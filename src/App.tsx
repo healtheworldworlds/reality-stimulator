@@ -1,16 +1,13 @@
 // Palette: #FAFAF8, #FFFFFF, #1A1A1A, #666660, #E5E5E0, #C85A32; type: Georgia + Inter/system sans.
 // Icons: Lucide outline set, monochrome, 1.5px stroke.
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
 import { createWorker } from 'tesseract.js'
 import {
   Activity,
   ArrowDownToLine,
-  Check,
-  ChevronDown,
   CircleHelp,
   Clipboard,
   FileImage,
-  Download,
   Copy,
   Plus,
   RefreshCw,
@@ -21,29 +18,14 @@ import { verifyPasscode } from './security/passcode'
 import {
   calculateProbabilities,
   expectedValue,
+  sampleScoreline,
   MAX_GOAL_RATE,
-  MAX_SIMULATION_RUNS,
   MAX_DIXON_COLES_RHO,
-  MAX_PICKS_PER_SIMULATION,
-  MIN_SIMULATION_RUNS,
   MIN_DIXON_COLES_RHO,
-  type FixtureRates,
-  type MonteCarloResult,
   type Market,
   type MarketProbabilities,
   type MarketSelection,
-  type SimulationPick,
-  type SimulationWorkerRequest,
-  type SimulationWorkerResponse,
 } from './engine/simulation'
-import {
-  generateSlipPermutations,
-  MAX_FOLD_SIZE,
-  MAX_GENERATED_SLIPS,
-  MAX_PERMUTATION_FIXTURES,
-  type GeneratedSlip,
-  type PermutationLeg,
-} from './engine/permutations'
 import { parseBetslipText, type ParsedBetslipFixture } from './engine/betslipParser'
 import './App.css'
 
@@ -59,16 +41,6 @@ type Fixture = {
   awayRecent: number
   recentAgeDays: number
   odds: Record<Market, number>
-}
-
-type SlipPick = {
-  id: string
-  fixtureId: string
-  fixture: string
-  market: Market
-  selection: MarketSelection
-  probability: number
-  odds: number
 }
 
 type AttachedScreenshot = {
@@ -100,8 +72,6 @@ type CustomFixtureDraft = {
   drawOdds: string
   awayOdds: string
 }
-
-type BookingSlip = GeneratedSlip & { referenceCode: string }
 
 const MIN_HALF_LIFE_DAYS = 7
 const MAX_HALF_LIFE_DAYS = 90
@@ -276,21 +246,6 @@ function sanitizeFileName(value: string) {
   return safeName || 'screenshot'
 }
 
-function randomToken() {
-  const bytes = new Uint8Array(6)
-  globalThis.crypto.getRandomValues(bytes)
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase()
-}
-
-function csvCell(value: string | number) {
-  const normalized = String(value)
-  const firstMeaningfulCharacter = normalized.trimStart().charAt(0)
-  const safeValue = typeof value === 'string' && ['=', '+', '-', '@'].includes(firstMeaningfulCharacter)
-    ? `'${normalized}`
-    : normalized
-  return `"${safeValue.replace(/"/g, '""')}"`
-}
-
 async function hasSupportedImageSignature(file: File) {
   const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer())
   if (file.type === 'image/png') {
@@ -394,65 +349,26 @@ function App() {
 function Workbench() {
   const [halfLifeDays, setHalfLifeDays] = useState(30)
   const [rho, setRho] = useState(-0.05)
-  const [runs, setRuns] = useState(25000)
-  const [isSimulating, setIsSimulating] = useState(false)
   const [fixturePool, setFixturePool] = useState(fixtures)
   const [customDraft, setCustomDraft] = useState<CustomFixtureDraft>(emptyCustomFixture)
   const [customRatePreset, setCustomRatePreset] = useState('balanced')
   const [customFormOpen, setCustomFormOpen] = useState(true)
-  const [selectedFixtureIds, setSelectedFixtureIds] = useState<string[]>([])
-  const [selectedMarkets, setSelectedMarkets] = useState<Map<string, Market>>(() => new Map())
-  const [targetSlips, setTargetSlips] = useState(10)
-  const [foldSize, setFoldSize] = useState(4)
-  const [minimumConfidence, setMinimumConfidence] = useState(0.65)
-  const [positiveEvOnly, setPositiveEvOnly] = useState(false)
-  const [permutations, setPermutations] = useState<GeneratedSlip[]>([])
-  const [bookingSlips, setBookingSlips] = useState<BookingSlip[]>([])
-  const [isQueueRunning, setIsQueueRunning] = useState(false)
   const [activeGroup, setActiveGroup] = useState<keyof typeof marketGroups>('result')
-  const [slip, setSlip] = useState<SlipPick[]>([])
+  const [roundFixtureIds, setRoundFixtureIds] = useState<string[]>([])
+  const [roundNumber, setRoundNumber] = useState(0)
+  const [roundResults, setRoundResults] = useState<Map<string, { homeGoals: number; awayGoals: number }>>(() => new Map())
   const [betText, setBetText] = useState('')
   const [attachedFiles, setAttachedFiles] = useState<AttachedScreenshot[]>([])
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
   const [ocrError, setOcrError] = useState('')
   const [rawScannedText, setRawScannedText] = useState('')
-  const [simulation, setSimulation] = useState<MonteCarloResult | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [status, setStatus] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const workerRef = useRef<Worker | null>(null)
-  const requestIdRef = useRef(0)
   const attachmentIdRef = useRef(0)
   const attachedFilesRef = useRef<AttachedScreenshot[]>([])
   const isOcrRunningRef = useRef(false)
   const nextFixtureIdRef = useRef(1)
-  const queueCancelledRef = useRef(false)
-  const queueRunIdRef = useRef(0)
-
-  useEffect(() => () => {
-    workerRef.current?.terminate()
-    queueRunIdRef.current += 1
-    queueCancelledRef.current = true
-  }, [])
-
-  function cancelSimulation() {
-    workerRef.current?.terminate()
-    workerRef.current = null
-    setIsSimulating(false)
-    setSimulation(null)
-  }
-
-  function cancelBookingQueue() {
-    queueRunIdRef.current += 1
-    queueCancelledRef.current = true
-    setIsQueueRunning(false)
-  }
-
-  function clearGeneratedSlips() {
-    cancelBookingQueue()
-    setPermutations([])
-    setBookingSlips([])
-  }
 
   const preparedFixtures = useMemo(
     () =>
@@ -468,50 +384,63 @@ function Workbench() {
       }),
     [fixturePool, halfLifeDays, rho],
   )
-  const calibratedSlip = useMemo(
-    () =>
-      slip.map((pick) => {
-        const fixture = preparedFixtures.find((item) => item.id === pick.fixtureId)
-        if (!fixture) throw new Error(`No fixture rates found for selected market "${pick.id}".`)
-        return {
-          ...pick,
-          probability: selectionProbability(fixture.probabilities, pick.market),
-          odds: fixture.odds[pick.market],
-        }
-      }),
-    [preparedFixtures, slip],
-  )
-
-  function addPick(fixtureId: string, market: Market) {
+  function toggleRoundFixture(fixtureId: string) {
     const fixture = preparedFixtures.find((item) => item.id === fixtureId)
     if (!fixture) return
-    const pickId = `${fixtureId}:${market}`
-    if (!slip.some((item) => item.id === pickId) && slip.length >= MAX_PICKS_PER_SIMULATION) {
-      setStatus(`A simulation can include at most ${MAX_PICKS_PER_SIMULATION} picks.`)
+    if (roundFixtureIds.includes(fixtureId)) {
+      setRoundFixtureIds((current) => current.filter((id) => id !== fixtureId))
+      setRoundResults((results) => {
+        const next = new Map(results)
+        next.delete(fixtureId)
+        return next
+      })
+      setStatus(`${fixture.home} v ${fixture.away} removed from the round lineup.`)
       return
     }
-    const pick: SlipPick = {
-      id: pickId,
-      fixtureId,
-      fixture: `${fixture.home} v ${fixture.away}`,
-      market,
-      selection: marketForSelection[market],
-      probability: selectionProbability(fixture.probabilities, market),
-      odds: fixture.odds[market],
-    }
-    cancelSimulation()
-    setSlip((current) => {
-      const next = current.filter((item) => item.id !== pick.id)
-      return [...next, pick]
-    })
-    setStatus(`${fixture.home} v ${fixture.away} — ${selectionLabels[market]} added to simulation slip.`)
+    setRoundFixtureIds((current) => [...current, fixtureId])
+    setStatus(`${fixture.home} v ${fixture.away} added to the round lineup.`)
   }
 
-  function updateRuns(value: string) {
-    const numeric = Number(value)
-    if (Number.isFinite(numeric) && numeric >= MIN_SIMULATION_RUNS && numeric <= MAX_SIMULATION_RUNS) {
-      cancelSimulation()
-      setRuns(Math.round(numeric))
+  function generateRoundResults() {
+    const selected = roundFixtureIds
+      .map((id) => preparedFixtures.find((fixture) => fixture.id === id))
+      .filter((fixture): fixture is (typeof preparedFixtures)[number] => fixture !== undefined)
+    if (selected.length === 0) {
+      setStatus('Add at least one match to the round lineup before generating results.')
+      return
+    }
+    const results = new Map<string, { homeGoals: number; awayGoals: number }>()
+    selected.forEach((fixture) => {
+      const score = sampleScoreline(fixture.lambda, fixture.mu, rho)
+      results.set(fixture.id, { homeGoals: score.homeGoals, awayGoals: score.awayGoals })
+    })
+    setRoundResults(results)
+    setRoundNumber((current) => current + 1)
+    setStatus(`Round ${roundNumber + 1} generated for ${selected.length} match${selected.length === 1 ? '' : 'es'}.`)
+  }
+
+  async function copyRoundOutcomes() {
+    if (roundNumber === 0 || roundFixtureIds.length === 0 || roundResults.size !== roundFixtureIds.length) {
+      setStatus('Generate a round before copying its outcomes.')
+      return
+    }
+    const lines = roundFixtureIds.flatMap((id) => {
+      const fixture = preparedFixtures.find((item) => item.id === id)
+      const result = roundResults.get(id)
+      if (!fixture || !result) return []
+      const totalGoals = result.homeGoals + result.awayGoals
+      const outcome = result.homeGoals > result.awayGoals
+        ? 'Home Win'
+        : result.homeGoals === result.awayGoals ? 'Draw' : 'Away Win'
+      const totals = (line: number) => totalGoals > line ? `Over ${line}.5` : `Under ${line}.5`
+      const bothScored = result.homeGoals > 0 && result.awayGoals > 0 ? 'GG' : 'NG'
+      return [`${fixture.home} vs ${fixture.away} | ${result.homeGoals} - ${result.awayGoals} | ${outcome} | ${totals(1)} | ${totals(2)} | ${bothScored}`]
+    })
+    try {
+      await navigator.clipboard.writeText([`Round ${roundNumber}`, ...lines].join('\n'))
+      setStatus(`Round ${roundNumber} outcomes copied.`)
+    } catch (error) {
+      setStatus(`Could not copy round outcomes: ${error instanceof Error ? error.message : 'clipboard unavailable'}`)
     }
   }
 
@@ -565,23 +494,12 @@ function Workbench() {
       return { added: 0, duplicates: unique.length === 0 ? parsedFixtures.length : 0, omitted: unique.length, defaultRateFixtures: 0 }
     }
 
-    const availableSelections = Math.max(0, MAX_PERMUTATION_FIXTURES - selectedFixtureIds.length)
-    const selectedFixtures = fixturesToAdd.slice(0, availableSelections)
     setFixturePool((current) => [...current, ...fixturesToAdd])
-    if (selectedFixtures.length > 0) {
-      setSelectedFixtureIds((current) => [...current, ...selectedFixtures.map((fixture) => fixture.id)])
-      setSelectedMarkets((current) => {
-        const next = new Map(current)
-        selectedFixtures.forEach((fixture) => next.set(fixture.id, 'home'))
-        return next
-      })
-    }
-    cancelSimulation()
-    clearGeneratedSlips()
+    setRoundFixtureIds((current) => [...current, ...fixturesToAdd.map((fixture) => fixture.id)])
     return {
       added: fixturesToAdd.length,
       duplicates: parsedFixtures.length - unique.length,
-      omitted: unique.length - fixturesToAdd.length + fixturesToAdd.length - selectedFixtures.length,
+      omitted: unique.length - fixturesToAdd.length,
       defaultRateFixtures,
     }
   }
@@ -730,7 +648,7 @@ function Workbench() {
       const summary: string[] = []
       if (result.added > 0) summary.push(`${result.added} fixture${result.added === 1 ? '' : 's'} added to the board`)
       if (result.duplicates > 0) summary.push(`${result.duplicates} duplicate fixture${result.duplicates === 1 ? '' : 's'} skipped`)
-      if (result.omitted > 0) summary.push(`${result.omitted} fixture${result.omitted === 1 ? '' : 's'} could not be added or selected due to pool limits`)
+      if (result.omitted > 0) summary.push(`${result.omitted} fixture${result.omitted === 1 ? '' : 's'} could not be added because the fixture pool is full`)
       if (parsedFixtures.length === 0 && scanErrors.length === 0) summary.push('No matchups were recognized')
       if (scanErrors.length > 0) summary.push(`${scanErrors.length} screenshot${scanErrors.length === 1 ? '' : 's'} could not be scanned`)
       if (cleanupError) summary.push('OCR worker cleanup failed')
@@ -748,69 +666,6 @@ function Workbench() {
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
     const files = event.clipboardData.files
     if (files.length > 0) addFiles(files)
-  }
-
-  function runSimulation() {
-    if (calibratedSlip.length === 0) {
-      setStatus('Add at least one market selection before running a simulation.')
-      return
-    }
-    cancelSimulation()
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
-    let worker: Worker
-    try {
-      worker = new Worker(new URL('./engine/simulation.worker.ts', import.meta.url), { type: 'module' })
-    } catch (error) {
-      setStatus(`Could not start the simulation worker: ${error instanceof Error ? error.message : 'unknown error'}`)
-      return
-    }
-    workerRef.current = worker
-    setIsSimulating(true)
-    setStatus(`Running ${runs.toLocaleString()} trials in a background worker.`)
-    worker.onmessage = (event: MessageEvent<SimulationWorkerResponse>) => {
-      if (workerRef.current !== worker || event.data.requestId !== requestId) return
-      worker.terminate()
-      workerRef.current = null
-      setIsSimulating(false)
-      if (event.data.type === 'error') {
-        setSimulation(null)
-        setStatus(`Simulation failed: ${event.data.message}`)
-        return
-      }
-      setSimulation(event.data.result)
-      setStatus(`Simulation complete: ${runs.toLocaleString()} trials across ${calibratedSlip.length} selected edge${calibratedSlip.length === 1 ? '' : 's'}.`)
-    }
-    worker.onerror = (event) => {
-      event.preventDefault()
-      if (workerRef.current !== worker) return
-      worker.terminate()
-      workerRef.current = null
-      setIsSimulating(false)
-      setSimulation(null)
-      setStatus(`Simulation worker failed: ${event.message || 'unknown worker error'}`)
-    }
-    const selectedIds = new Set(calibratedSlip.map((pick) => pick.fixtureId))
-    const workerFixtures: FixtureRates[] = preparedFixtures.filter(({ id }) => selectedIds.has(id)).map(({ id, home, away, lambda, mu }) => ({
-      id, home, away, lambda, mu,
-    }))
-    const workerPicks: SimulationPick[] = calibratedSlip.map(({ id, fixtureId, fixture, market, selection, probability, odds }) => ({
-      id, fixtureId, fixture, market, selection, probability, odds,
-    }))
-    const request: SimulationWorkerRequest = { requestId, fixtures: workerFixtures, picks: workerPicks, runs, rho }
-    try {
-      worker.postMessage(request)
-    } catch (error) {
-      worker.terminate()
-      workerRef.current = null
-      setIsSimulating(false)
-      setStatus(`Could not send simulation inputs to the background worker: ${error instanceof Error ? error.message : 'unknown error'}`)
-    }
-  }
-
-  function removePick(id: string) {
-    cancelSimulation()
-    setSlip((current) => current.filter((pick) => pick.id !== id))
   }
 
   function removeAttachment(id: number) {
@@ -893,171 +748,23 @@ function Workbench() {
       recentAgeDays: 0,
       odds,
     }])
-    setSelectedFixtureIds((current) => [...current, id])
-    setSelectedMarkets((current) => new Map(current).set(id, 'home'))
     setCustomDraft(emptyCustomFixture)
     setCustomRatePreset('balanced')
-    cancelSimulation()
-    setPermutations([])
-    setBookingSlips([])
-    cancelBookingQueue()
-    setStatus(`${home} v ${away} added to the fixture board and permutation pool.`)
-  }
-
-  function togglePermutationFixture(fixtureId: string) {
-    const isSelected = selectedFixtureIds.includes(fixtureId)
-    if (!isSelected && selectedFixtureIds.length >= MAX_PERMUTATION_FIXTURES) {
-      setStatus(`Select no more than ${MAX_PERMUTATION_FIXTURES} fixtures for permutations.`)
-      return
-    }
-    if (isSelected) {
-      setSelectedFixtureIds((current) => current.filter((id) => id !== fixtureId))
-    } else {
-      setSelectedFixtureIds((current) => [...current, fixtureId])
-      if (!selectedMarkets.has(fixtureId)) {
-        setSelectedMarkets((markets) => {
-          if (markets.has(fixtureId)) return markets
-          const next = new Map(markets)
-          next.set(fixtureId, 'home')
-          return next
-        })
-      }
-    }
-    setPermutations([])
-    setBookingSlips([])
-    cancelBookingQueue()
-  }
-
-  function generatePermutations() {
-    const legs: PermutationLeg[] = selectedFixtureIds.flatMap((fixtureId) => {
-      const fixture = preparedFixtures.find((item) => item.id === fixtureId)
-      const market = selectedMarkets.get(fixtureId)
-      if (!fixture || !market) return []
-      const probability = selectionProbability(fixture.probabilities, market)
-      const odds = fixture.odds[market]
-      return [{
-        fixtureId,
-        fixture: `${fixture.home} v ${fixture.away}`,
-        market,
-        selection: selectionLabels[market],
-        probability,
-        odds,
-        ev: expectedValue(probability, odds),
-      }]
-    })
-    try {
-      const generated = generateSlipPermutations(legs, {
-        target: targetSlips,
-        foldSize,
-        minimumConfidence,
-        positiveEvOnly,
-      })
-      setPermutations(generated)
-      setBookingSlips([])
-      cancelBookingQueue()
-      setStatus(`Generated ${generated.length} unique ${foldSize}-fold slips from ${legs.length} selected fixtures.`)
-    } catch (error) {
-      setPermutations([])
-      setStatus(`Could not generate slips: ${error instanceof Error ? error.message : 'unknown error'}`)
-    }
-  }
-
-  async function generateSportyBetCodes() {
-    if (permutations.length === 0) {
-      setStatus('Generate slip permutations before starting the reference-code queue.')
-      return
-    }
-    cancelBookingQueue()
-    queueCancelledRef.current = false
-    const queueRunId = queueRunIdRef.current
-    setBookingSlips([])
-    setIsQueueRunning(true)
-    setStatus(`Preparing ${permutations.length} simulated reference codes at 400 ms intervals.`)
-    const queued: BookingSlip[] = []
-    for (const [index, slipItem] of permutations.entries()) {
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 400))
-      if (queueCancelledRef.current || queueRunIdRef.current !== queueRunId) {
-        setIsQueueRunning(false)
-        setStatus(`Reference-code queue paused after ${queued.length} of ${permutations.length} slips.`)
-        return
-      }
-      try {
-        queued.push({ ...slipItem, referenceCode: `SB-REF-${randomToken()}` })
-      } catch (error) {
-        setIsQueueRunning(false)
-        setStatus(`Could not generate a secure reference code: ${error instanceof Error ? error.message : 'unknown error'}`)
-        return
-      }
-      setBookingSlips([...queued])
-      setStatus(`Preparing reference codes: ${index + 1} of ${permutations.length}.`)
-    }
-    setIsQueueRunning(false)
-    setStatus(`Prepared ${queued.length} local reference codes. These are not SportyBet booking codes and cannot place bets.`)
-  }
-
-  async function copyReferenceCode(code: string) {
-    try {
-      await navigator.clipboard.writeText(code)
-      setStatus('Reference code copied.')
-    } catch (error) {
-      setStatus(`Could not copy the reference code: ${error instanceof Error ? error.message : 'clipboard unavailable'}`)
-    }
-  }
-
-  async function copyAllReferenceCodes() {
-    if (bookingSlips.length === 0) return
-    await copyReferenceCode(bookingSlips.map((ticket, index) => `${index + 1}. ${ticket.referenceCode}`).join('\n'))
-  }
-
-  function exportSlips(format: 'csv' | 'text') {
-    if (bookingSlips.length === 0) {
-      setStatus('Generate reference codes before exporting the slip portfolio.')
-      return
-    }
-    const content = format === 'csv'
-      ? [
-          ['Slip #', 'Matches / picks', 'Combined odds', 'Simulated hit %', 'Portfolio EV', 'Reference code'].map(csvCell).join(','),
-          ...bookingSlips.map((ticket, index) => [
-            String(index + 1),
-            ticket.legs.map((leg) => `${leg.fixture}: ${leg.selection}`).join(' | '),
-            ticket.combinedOdds.toFixed(2),
-            formatProbability(ticket.probability),
-            `${ticket.ev >= 0 ? '+' : ''}${(ticket.ev * 100).toFixed(2)}%`,
-            ticket.referenceCode,
-          ].map(csvCell).join(',')),
-        ].join('\r\n')
-      : bookingSlips.map((ticket, index) =>
-          `Slip ${index + 1} | ${ticket.legs.map((leg) => `${leg.fixture}: ${leg.selection}`).join(' / ')} | Odds ${ticket.combinedOdds.toFixed(2)} | Hit ${formatProbability(ticket.probability)} | EV ${ticket.ev >= 0 ? '+' : ''}${(ticket.ev * 100).toFixed(2)}% | Ref ${ticket.referenceCode}`,
-        ).join('\n')
-    const blob = new Blob([content], { type: format === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `reality-simulator-slips.${format}`
-    link.click()
-    window.setTimeout(() => URL.revokeObjectURL(url), 0)
-    setStatus(`Exported ${bookingSlips.length} slips as ${format.toUpperCase()}.`)
+    setRoundFixtureIds((current) => [...current, id])
+    setStatus(`${home} v ${away} added to the fixture board and round lineup.`)
   }
 
   function renderMarkets(fixture: (typeof preparedFixtures)[number]) {
     return marketGroups[activeGroup].markets.map((market) => {
       const probability = selectionProbability(fixture.probabilities, market)
       const ev = expectedValue(probability, fixture.odds[market])
-      const isSelected = slip.some((pick) => pick.id === `${fixture.id}:${market}`)
       return (
-        <button
-          className={`market-option${isSelected ? ' is-selected' : ''}`}
-          key={market}
-          type="button"
-          onClick={() => addPick(fixture.id, market)}
-          aria-label={`Add ${selectionLabels[market]} for ${fixture.home} versus ${fixture.away}, model probability ${formatProbability(probability)}, odds ${fixture.odds[market]}`}
-        >
+        <div className="market-option" key={market}>
           <span className="market-option__name">{selectionLabels[market]}</span>
           <span className="market-option__probability">{formatProbability(probability)}</span>
           <span className="market-option__odds">{fixture.odds[market].toFixed(2)}</span>
           <span className={`market-option__ev${ev > 0 ? ' is-positive' : ''}`}>EV {ev > 0 ? '+' : ''}{(ev * 100).toFixed(1)}%</span>
-          <span className="market-option__add" aria-hidden="true">{isSelected ? <Check size={14} /> : <Plus size={14} />}</span>
-        </button>
+        </div>
       )
     })
   }
@@ -1069,7 +776,7 @@ function Workbench() {
           <span className="wordmark__mark">RS</span>
           <span>Reality Simulator</span>
         </a>
-        <div className="topbar__title">— Dixon-Coles & Monte Carlo Workbench</div>
+        <div className="topbar__title">— Dixon–Coles Round Outcome Workbench</div>
         <nav className="topbar__nav" aria-label="Main navigation">
           <a className="nav-link is-active" href="#fixtures">Workbench</a>
           <a className="nav-link" href="#method">Method</a>
@@ -1079,11 +786,11 @@ function Workbench() {
 
       <section className="intro" id="top">
         <div>
-          <p className="eyebrow">Football modelling / Research desk 01</p>
-          <h1>Price the match.<br /><em>Test the edge.</em></h1>
+          <p className="eyebrow">Football simulation / Research desk 01</p>
+          <h1>Simulate the match.<br /><em>Generate the round.</em></h1>
         </div>
         <div className="intro__aside">
-          <p>A probability workbench for expected goals, low-score dependence and market value.</p>
+          <p>Generate consecutive match outcomes from expected goals and low-score dependence.</p>
           <a href="#method" className="text-link">How the model works <ArrowDownToLine size={14} /></a>
         </div>
       </section>
@@ -1099,18 +806,13 @@ function Workbench() {
         <div className="calibration__controls">
           <label className="control">
             <span className="control__top"><span>Half-life decay</span><strong>{halfLifeDays} days</strong></span>
-            <input type="range" min={MIN_HALF_LIFE_DAYS} max={MAX_HALF_LIFE_DAYS} step="1" value={halfLifeDays} onChange={(event) => { cancelSimulation(); clearGeneratedSlips(); setHalfLifeDays(Number(event.target.value)) }} />
+            <input type="range" min={MIN_HALF_LIFE_DAYS} max={MAX_HALF_LIFE_DAYS} step="1" value={halfLifeDays} onChange={(event) => setHalfLifeDays(Number(event.target.value))} />
             <span className="control__caption">Recent-form signal fades against team priors over time.</span>
           </label>
           <label className="control">
             <span className="control__top"><span>Dixon–Coles ρ correction</span><strong>{rho.toFixed(2)}</strong></span>
-            <input type="range" min={MIN_DIXON_COLES_RHO} max={MAX_DIXON_COLES_RHO} step="0.01" value={rho} onChange={(event) => { cancelSimulation(); clearGeneratedSlips(); setRho(Number(event.target.value)) }} />
+            <input type="range" min={MIN_DIXON_COLES_RHO} max={MAX_DIXON_COLES_RHO} step="0.01" value={rho} onChange={(event) => setRho(Number(event.target.value))} />
             <span className="control__caption">Reweights 0–0, 0–1, 1–0 and 1–1 scorelines.</span>
-          </label>
-          <label className="control control--runs">
-            <span className="control__top"><span>Monte Carlo volume</span><strong>{runs.toLocaleString()} runs</strong></span>
-            <input type="range" min={MIN_SIMULATION_RUNS} max={MAX_SIMULATION_RUNS} step="1000" value={runs} onChange={(event) => updateRuns(event.target.value)} />
-            <span className="control__caption">Set the number of simulated scoreline trials.</span>
           </label>
         </div>
       </section>
@@ -1186,7 +888,7 @@ function Workbench() {
               <p className="eyebrow">03 / Upcoming markets</p>
               <h2 id="fixture-heading">Fixture board</h2>
             </div>
-            <button className="quiet-button" type="button" onClick={() => { cancelSimulation(); setStatus('Fixture probabilities refreshed from the current calibration inputs.') }}>
+            <button className="quiet-button" type="button" onClick={() => { setStatus('Fixture probabilities refreshed from the current calibration inputs.') }}>
               <RefreshCw size={14} /> Recalculate
             </button>
           </div>
@@ -1214,33 +916,14 @@ function Workbench() {
                   </div>
                 </div>
                 <div className="fixture__pool-controls">
-                  <label className="fixture-select">
-                    <input
-                      type="checkbox"
-                      checked={selectedFixtureIds.includes(fixture.id)}
-                      disabled={!selectedFixtureIds.includes(fixture.id) && selectedFixtureIds.length >= MAX_PERMUTATION_FIXTURES}
-                      onChange={() => togglePermutationFixture(fixture.id)}
-                    />
-                    <span>Use in permutations</span>
-                  </label>
-                  {selectedFixtureIds.includes(fixture.id) && (
-                    <label className="fixture-market-select">
-                      <span>Selection</span>
-                      <select
-                        value={selectedMarkets.get(fixture.id) ?? 'home'}
-                        onChange={(event) => {
-                          const market = event.target.value as Market
-                          if (!Object.hasOwn(selectionLabels, market)) return
-                          clearGeneratedSlips()
-                          setSelectedMarkets((current) => new Map(current).set(fixture.id, market))
-                        }}
-                      >
-                        {(Object.keys(selectionLabels) as Market[]).map((market) => (
-                          <option key={market} value={market}>{selectionLabels[market]}</option>
-                        ))}
-                      </select>
-                    </label>
-                  )}
+                  <button
+                    className={`quiet-button round-fixture-toggle${roundFixtureIds.includes(fixture.id) ? ' is-added' : ''}`}
+                    type="button"
+                    aria-pressed={roundFixtureIds.includes(fixture.id)}
+                    onClick={() => toggleRoundFixture(fixture.id)}
+                  >
+                    {roundFixtureIds.includes(fixture.id) ? 'Added to round' : 'Add to round'}
+                  </button>
                 </div>
                 <div className={`fixture__markets fixture__markets--${activeGroup}`}>
                   {renderMarkets(fixture)}
@@ -1248,7 +931,7 @@ function Workbench() {
               </article>
             ))}
           </div>
-          <p className="data-note"><CircleHelp size={13} /> Select up to {MAX_PERMUTATION_FIXTURES} matches for slip generation. Fixture odds are illustrative, not live prices or betting advice.</p>
+          <p className="data-note"><CircleHelp size={13} /> Add any listed match to the round lineup. Fixture odds are illustrative, not live prices or betting advice.</p>
           </section>
         </div>
 
@@ -1292,161 +975,68 @@ function Workbench() {
             )}
             <label className="paste-label" htmlFor="bet-text">Paste selections or notes</label>
             <textarea id="bet-text" value={betText} maxLength={MAX_PASTED_TEXT_LENGTH} onChange={(event) => setBetText(sanitizeBetText(event.target.value))} onPaste={handlePaste} placeholder={'Arsenal — Over 2.5 — 1.76\nPaste your betslip text here'} rows={3} />
-            <p className="intake-note">Recognized matchups are added to the fixture board and permutation pool. Review OCR team names and prices before use.</p>
+            <p className="intake-note">Recognized matchups are added to the fixture board and round lineup.</p>
           </section>
 
           <section className="slip-section" aria-labelledby="slip-heading">
             <div className="side-heading side-heading--slip">
-              <div><p className="eyebrow">05 / Decision log</p><h2 id="slip-heading">Simulation slip <span className="count-badge">{slip.length}</span></h2></div>
-              {slip.length > 0 && <button className="icon-button" type="button" onClick={() => { cancelSimulation(); setSlip([]) }} aria-label="Clear simulation slip"><Trash2 size={15} /></button>}
+                <div><p className="eyebrow">05 / Round generator</p><h2 id="slip-heading">Round outcomes <span className="count-badge">{roundFixtureIds.length}</span></h2></div>
+                {roundFixtureIds.length > 0 && <button className="icon-button" type="button" onClick={() => { setRoundFixtureIds([]); setRoundResults(new Map()) }} aria-label="Clear round lineup"><Trash2 size={15} /></button>}
             </div>
-            <section className="permutation-tool" aria-labelledby="permutation-heading">
-              <div className="permutation-heading">
-                <div>
-                  <p className="eyebrow">05 / Multi-match portfolio</p>
-                  <h3 id="permutation-heading">Permutation generator</h3>
-                </div>
-                <span className="section-note">{selectedFixtureIds.length} / {MAX_PERMUTATION_FIXTURES} matches</span>
-              </div>
-              <p className="permutation-intro">Choose fixtures and one market per match on the board. Each ticket uses a unique combination of fixtures.</p>
-              <div className="permutation-controls">
-                <label className="form-field">
-                  <span>Target slips</span>
-                  <input type="number" min="1" max={MAX_GENERATED_SLIPS} step="1" value={targetSlips} onChange={(event) => {
-                    const value = Number(event.target.value)
-                    if (Number.isInteger(value) && value >= 1 && value <= MAX_GENERATED_SLIPS) {
-                      clearGeneratedSlips()
-                      setTargetSlips(value)
-                    }
-                  }} />
-                </label>
-                <label className="form-field">
-                  <span>Fold size</span>
-                  <select value={foldSize} onChange={(event) => {
-                    const value = Number(event.target.value)
-                    if (Number.isInteger(value) && value >= 1 && value <= MAX_FOLD_SIZE) {
-                      clearGeneratedSlips()
-                      setFoldSize(value)
-                    }
-                  }}>
-                    {[4, 5, 6, 7, 8].map((size) => <option key={size} value={size}>{size}-fold</option>)}
-                  </select>
-                </label>
-                <label className="form-field">
-                  <span>Minimum confidence</span>
-                  <select value={minimumConfidence} onChange={(event) => {
-                    const value = Number(event.target.value)
-                    if (Number.isFinite(value) && value >= 0 && value <= 1) {
-                      clearGeneratedSlips()
-                      setMinimumConfidence(value)
-                    }
-                  }}>
-                    <option value="0.50">50%+</option>
-                    <option value="0.60">60%+</option>
-                    <option value="0.65">65%+</option>
-                    <option value="0.70">70%+</option>
-                    <option value="0.75">75%+</option>
-                  </select>
-                </label>
-              </div>
-              <label className="filter-toggle">
-                <input type="checkbox" checked={positiveEvOnly} onChange={(event) => {
-                  clearGeneratedSlips()
-                  setPositiveEvOnly(event.target.checked)
-                }} />
-                <span>Positive expected value only</span>
-              </label>
-              <button className="quiet-button permutation-generate" type="button" onClick={generatePermutations}>
-                <RefreshCw size={14} /> Generate unique slips
-              </button>
-            </section>
-            {permutations.length > 0 && (
-              <section className="permutation-results" aria-label="Generated slip combinations">
-                <div className="permutation-summary">
-                  <div><span>Unique slips</span><strong>{permutations.length}</strong></div>
-                  <div><span>Mean portfolio EV</span><strong className={permutations.reduce((sum, ticket) => sum + ticket.ev, 0) > 0 ? 'is-positive' : ''}>{(permutations.reduce((sum, ticket) => sum + ticket.ev, 0) / permutations.length * 100).toFixed(2)}%</strong></div>
-                </div>
-                <div className="export-controls">
-                  <button className="quiet-button" type="button" onClick={() => exportSlips('csv')}><Download size={13} /> Export CSV</button>
-                  <button className="quiet-button" type="button" onClick={() => exportSlips('text')}><Download size={13} /> Export text</button>
-                </div>
-                <div className="permutation-list">
-                  {permutations.map((ticket, index) => (
-                    <article className="permutation-ticket" key={ticket.id}>
-                      <div className="permutation-ticket__head">
-                        <strong>Slip {index + 1}</strong>
-                        <span>{ticket.legs.length}-fold</span>
-                      </div>
-                      <ul>{ticket.legs.map((leg) => <li key={`${leg.fixtureId}:${leg.market}`}>{leg.fixture} · {leg.selection}</li>)}</ul>
-                      <div className="permutation-ticket__metrics">
-                        <span>Odds <strong>{ticket.combinedOdds.toFixed(2)}</strong></span>
-                        <span>Hit <strong>{formatProbability(ticket.probability)}</strong></span>
-                        <span>EV <strong className={ticket.ev > 0 ? 'is-positive' : ''}>{ticket.ev > 0 ? '+' : ''}{(ticket.ev * 100).toFixed(2)}%</strong></span>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-                <div className="booking-queue">
-                  <div className="booking-queue__heading">
-                    <div><p className="eyebrow">06 / Local preparation queue</p><h3>SportyBet reference codes</h3></div>
-                    {isQueueRunning
-                      ? <button className="quiet-button" type="button" onClick={cancelBookingQueue}>Pause queue</button>
-                      : <button className="run-button booking-trigger" type="button" onClick={() => void generateSportyBetCodes()}><RefreshCw size={14} /> Generate codes</button>}
+              <section className="round-generator" aria-label="Round outcome generator">
+                <div className="round-generator__heading">
+                  <div>
+                    <p className="eyebrow">Current round</p>
+                    <h3>{roundNumber > 0 ? `Round ${roundNumber}` : 'No round generated'}</h3>
                   </div>
-                  <p className="booking-disclaimer">Simulated local reference strings only. These are not official SportyBet booking codes and cannot submit or place bets. Jobs are prepared sequentially at 400 ms intervals.</p>
-                  {bookingSlips.length > 0 && (
-                    <>
-                      <div className="export-controls">
-                        <span className="section-note">{bookingSlips.length} / {permutations.length} prepared</span>
-                        <button className="quiet-button" type="button" onClick={() => void copyAllReferenceCodes()}><Copy size={13} /> Copy all refs</button>
-                      </div>
-                      <div className="booking-table-wrap">
-                        <table className="booking-table">
-                          <thead><tr><th>Slip #</th><th>Matches / picks</th><th>Odds</th><th>Hit</th><th>Reference</th></tr></thead>
-                          <tbody>{bookingSlips.map((ticket, index) => (
-                            <tr key={ticket.id}>
-                              <td>{index + 1}</td>
-                              <td>{ticket.legs.map((leg) => `${leg.fixture} · ${leg.selection}`).join(' / ')}</td>
-                              <td>{ticket.combinedOdds.toFixed(2)}</td>
-                              <td>{formatProbability(ticket.probability)}</td>
-                              <td><button className="reference-code" type="button" title="Copy simulated reference code" onClick={() => void copyReferenceCode(ticket.referenceCode)}>{ticket.referenceCode} <Copy size={12} /></button></td>
-                            </tr>
-                          ))}</tbody>
-                        </table>
-                      </div>
-                    </>
-                  )}
+                  <span className="section-note">{roundFixtureIds.length} match{roundFixtureIds.length === 1 ? '' : 'es'} locked in</span>
+                </div>
+                {roundFixtureIds.length === 0 ? (
+                  <div className="empty-slip"><p>Add matches from the fixture board or scan a betslip to build your round lineup.</p></div>
+                ) : (
+                  <div className="round-fixtures" aria-live="polite">
+                    {roundFixtureIds.map((fixtureId) => {
+                      const fixture = preparedFixtures.find((item) => item.id === fixtureId)
+                      if (!fixture) return null
+                      const result = roundResults.get(fixtureId)
+                      const totalGoals = result ? result.homeGoals + result.awayGoals : null
+                      const resultLabel = result
+                        ? result.homeGoals > result.awayGoals ? 'Home Win' : result.homeGoals === result.awayGoals ? 'Draw' : 'Away Win'
+                        : 'Pending'
+                      const overUnder = (line: number) => totalGoals !== null
+                        ? totalGoals > line ? `Over ${line}.5` : `Under ${line}.5`
+                        : 'Pending'
+                      const bothScored = result
+                        ? result.homeGoals > 0 && result.awayGoals > 0 ? 'GG' : 'NG'
+                        : 'Pending'
+                      return (
+                        <article className="round-fixture" key={fixture.id}>
+                          <div className="round-fixture__head">
+                            <strong>{fixture.home} vs {fixture.away}</strong>
+                            <button className="icon-button" type="button" onClick={() => toggleRoundFixture(fixture.id)} aria-label={`Remove ${fixture.home} versus ${fixture.away} from round lineup`}><Trash2 size={13} /></button>
+                          </div>
+                          <div className="round-fixture__score" aria-label={result ? `Simulated final score ${result.homeGoals} to ${result.awayGoals}` : 'Score pending'}>
+                            {result ? `${result.homeGoals} - ${result.awayGoals}` : '— - —'}
+                          </div>
+                          <div className="round-fixture__outcomes">
+                            <p><span>1X2</span><strong>{resultLabel}</strong></p>
+                            <p><span>Goals</span><strong>{overUnder(1)} · {overUnder(2)}</strong></p>
+                            <p><span>Both score</span><strong>{bothScored}</strong></p>
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                )}
+                <div className="round-generator__actions">
+                  <button className="run-button" type="button" onClick={generateRoundResults} disabled={roundFixtureIds.length === 0}>
+                    <RefreshCw size={14} /> Generate Round Results
+                  </button>
+                  <button className="quiet-button" type="button" onClick={() => void copyRoundOutcomes()} disabled={roundNumber === 0 || roundResults.size !== roundFixtureIds.length || roundFixtureIds.length === 0}>
+                    <Copy size={13} /> Copy Round Outcomes
+                  </button>
                 </div>
               </section>
-            )}
-            {slip.length === 0 ? (
-              <div className="empty-slip"><p>Select a market from the fixture board to add it here.</p><span>Model probability × decimal odds − 1 = EV</span></div>
-            ) : (
-              <div className="slip-picks">
-                {calibratedSlip.map((pick) => {
-                  const ev = expectedValue(pick.probability, pick.odds)
-                  return (
-                    <article className="slip-pick" key={pick.id}>
-                      <div className="slip-pick__title"><div><strong>{pick.fixture}</strong><span>{selectionLabels[pick.market]}</span></div><button className="icon-button" type="button" onClick={() => removePick(pick.id)} aria-label={`Remove ${selectionLabels[pick.market]} for ${pick.fixture}`}><Trash2 size={14} /></button></div>
-                      <div className="slip-pick__math"><span>{formatProbability(pick.probability)} × {pick.odds.toFixed(2)} − 1</span><strong className={ev > 0 ? 'is-positive' : ''}>{ev > 0 ? '+' : ''}{(ev * 100).toFixed(2)}%</strong></div>
-                    </article>
-                  )
-                })}
-                <button className="run-button" type="button" onClick={runSimulation} disabled={isSimulating}>{isSimulating ? 'Simulation running…' : 'Run simulation'} <ChevronDown size={16} /></button>
-              </div>
-            )}
-            {simulation && (
-              <div className="simulation-results" aria-live="polite">
-                <div className="simulation-results__heading"><span>Monte Carlo result</span><b>{simulation.runs.toLocaleString()} trials</b></div>
-                {simulation.results.map((result) => (
-                  <div className="simulation-result" key={result.id}>
-                    <span>{result.fixture} · {selectionLabels[result.market]}</span>
-                    <strong>{formatProbability(result.simulatedProbability)} simulated</strong>
-                    <small>{result.wins.toLocaleString()} hits · exact EV {result.ev > 0 ? '+' : ''}{(result.ev * 100).toFixed(2)}%</small>
-                  </div>
-                ))}
-              </div>
-            )}
           </section>
         </aside>
       </div>
@@ -1455,7 +1045,7 @@ function Workbench() {
         <div><p className="eyebrow">07 / Method note</p><h2>From rates to<br /><em>realized outcomes.</em></h2></div>
         <div className="method-copy">
           <p>Independent Poisson goal rates form the score matrix. Dixon–Coles τ corrections adjust the four low-scoring outcomes, then the normalized matrix yields 1X2, totals and BTTS probabilities.</p>
-          <p>Each selected price is evaluated as <strong>EV = (model probability × decimal odds) − 1</strong>. Monte Carlo trials sample from that same corrected score distribution; simulated hit rates are diagnostics, while EV remains the exact model calculation.</p>
+          <p>Each round draws one independent scoreline per selected fixture from its corrected Dixon–Coles matrix. The fixture lineup remains fixed between rounds so consecutive simulated outcomes can be generated and copied.</p>
           <p>Half-life blends illustrative recent-form rates against team priors. All fixture inputs and prices in this prototype are examples, not a live data feed.</p>
         </div>
       </section>

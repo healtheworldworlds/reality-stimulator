@@ -199,6 +199,19 @@ function sampleCell(matrix: ScorelineCell[], random: number) {
   return matrix[matrix.length - 1]
 }
 
+export function sampleScoreline(
+  lambda: number,
+  mu: number,
+  rho = -0.05,
+  random: () => number = Math.random,
+): ScorelineCell {
+  const draw = random()
+  if (!Number.isFinite(draw) || draw < 0 || draw >= 1) {
+    throw new RangeError('random must return a finite value in the range [0, 1).')
+  }
+  return sampleCell(buildScoreMatrix(lambda, mu, rho), draw)
+}
+
 function selectionWins(homeGoals: number, awayGoals: number, selection: MarketSelection) {
   const totalGoals = homeGoals + awayGoals
   switch (selection) {
