@@ -24,7 +24,7 @@ The matrix is normalized before deriving 1X2, Over/Under 1.5 and 2.5, and BTTS p
 
 ## Prototype inputs
 
-Fixture rates and bookmaker odds in `src/App.tsx` are illustrative static examples, not live feeds. The half-life control blends those recent-form example rates against their priors. The screenshot intake verifies PNG, JPEG and WebP images before running English Tesseract OCR locally in the browser. Recognized matchups are added to the fixture board and permutation pool; unprinted goal rates default to λ 1.65 / μ 1.15. OCR output and inferred prices should be reviewed before use.
+Fixture rates and bookmaker odds in `src/App.tsx` are illustrative static examples, not live feeds. The half-life control blends those recent-form example rates against their priors. The screenshot intake verifies PNG, JPEG and WebP images before running English Tesseract OCR locally in the browser. Recognized inline or stacked matchups, 1X2, totals and BTTS prices are added to the fixture board and permutation pool; unprinted goal rates default to λ 1.65 / μ 1.15. Per-image OCR status and raw text are available for review; OCR output and inferred prices should be checked before use.
 
 ## Custom fixtures and permutations
 
@@ -35,8 +35,8 @@ The “SportyBet reference codes” queue is intentionally a local demonstration
 ## Security notes
 
 - Vite exposes only `VITE_`-prefixed environment variables to browser code. Treat every such variable as public; do not put credentials or service-role keys in client environment files.
-- Betslip images are limited to PNG, JPEG or WebP, checked against their file signatures, limited to 10 MB each and five attachments total. OCR processing runs in a browser worker; image bytes are not uploaded. Tesseract worker and language data are fetched from jsDelivr.
+- Betslip images are limited to PNG, JPEG or WebP, checked against their file signatures, limited to 10 MB each and five attachments total. OCR processing runs in a same-origin browser worker; image bytes are not uploaded. The pinned Tesseract.js 7.0.0 worker/core and `@tesseract.js-data/eng` 1.0.0 language model are served from `public/ocr`, avoiding runtime CDN/CORS dependencies. If worker, WASM or language initialization fails, the intake shows the OCR error details.
 - Pasted notes are control-character filtered and capped at 5,000 characters. Notes and filenames are rendered as text, never as HTML.
 - Rates, ρ, half-life, odds and simulation dimensions have engine-side bounds. Monte Carlo runs are capped at 100,000, with total fixture/pick trial budgets, and execute in a module Web Worker.
-- Vite dev/preview responses and the static-host `public/_headers` configuration set CSP and browser security headers. Development CSP permits Vite/React Refresh inline scripts and styles for HMR; production CSP permits neither.
+- Vite dev/preview responses, `vercel.json`, and the static-host `public/_headers` configuration set CSP and browser security headers. CSP allows WebAssembly compilation with `wasm-unsafe-eval`; it does not allow general `unsafe-eval`. Development CSP permits Vite/React Refresh inline scripts and styles for HMR; production CSP permits neither.
 - Production builds explicitly disable source maps. Run `npm audit` and inspect the deployment host's response headers as part of release checks.

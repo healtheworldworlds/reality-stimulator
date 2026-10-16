@@ -13,11 +13,11 @@ export default defineConfig(({ mode }) => {
   const development = mode !== 'production'
   const contentSecurityPolicy = [
     "default-src 'self'",
-    `script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'${development ? " 'unsafe-inline'" : ''}`,
+    `script-src 'self' 'wasm-unsafe-eval'${development ? " 'unsafe-inline'" : ''}`,
     `style-src 'self'${development ? " 'unsafe-inline'" : ''}`,
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
-    `connect-src 'self' https://cdn.jsdelivr.net${development ? ' ws://localhost:* ws://127.0.0.1:*' : ''}`,
+    `connect-src 'self'${development ? ' ws://localhost:* ws://127.0.0.1:*' : ''}`,
     "worker-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'self'",

@@ -74,6 +74,7 @@ type AttachedScreenshot = {
   id: number
   name: string
   size: number
+  ocrStatus: string
 }
 
 type VerifiedScreenshot = {
@@ -82,6 +83,7 @@ type VerifiedScreenshot = {
 }
 
 type OcrProgress = {
+  attachmentId: number
   fileName: string
   percent: number
   stage: string
@@ -105,6 +107,7 @@ const MAX_HALF_LIFE_DAYS = 90
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 const MAX_SCREENSHOTS = 5
 const MAX_PASTED_TEXT_LENGTH = 5000
+const MAX_OCR_TEXT_LENGTH = 20_000
 const MAX_CUSTOM_TEAM_NAME_LENGTH = 80
 const MAX_CUSTOM_KICKOFF_LENGTH = 64
 const MAX_FIXTURE_POOL_SIZE = 100
@@ -331,6 +334,8 @@ function App() {
   const [betText, setBetText] = useState('')
   const [attachedFiles, setAttachedFiles] = useState<AttachedScreenshot[]>([])
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
+  const [ocrError, setOcrError] = useState('')
+  const [rawScannedText, setRawScannedText] = useState('')
   const [simulation, setSimulation] = useState<MonteCarloResult | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [status, setStatus] = useState('')
@@ -452,7 +457,11 @@ function App() {
         away: Math.min(1000, 1 / probabilities.away),
       }
       for (const [index, market] of (['home', 'draw', 'away'] as const).entries()) {
-        const parsedOdds = parsed.odds[index]
+        const parsedOdds = parsed.marketOdds[market] ?? parsed.odds[index]
+        if (parsedOdds !== undefined) fallbackOdds[market] = parsedOdds
+      }
+      for (const market of ['over15', 'under15', 'over25', 'under25', 'bttsYes', 'bttsNo'] as const) {
+        const parsedOdds = parsed.marketOdds[market]
         if (parsedOdds !== undefined) fallbackOdds[market] = parsedOdds
       }
       const id = `ocr-${nextFixtureIdRef.current}`
@@ -497,6 +506,25 @@ function App() {
     }
   }
 
+  function updateAttachmentStatus(id: number, ocrStatus: string) {
+    setAttachedFiles((current) => {
+      const next = current.map((file) => file.id === id ? { ...file, ocrStatus } : file)
+      attachedFilesRef.current = next
+      return next
+    })
+  }
+
+  function errorDetails(error: unknown) {
+    if (error instanceof Error && error.message) return sanitizePlainText(error.message, 400)
+    if (typeof error === 'string' && error.trim() && error !== 'undefined' && error !== '[object Event]') {
+      return sanitizePlainText(error, 400)
+    }
+    if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' && error.message) {
+      return sanitizePlainText(error.message, 400)
+    }
+    return 'OCR worker could not load. Check the deployed /ocr assets and Content-Security-Policy.'
+  }
+
   async function addFiles(fileList: FileList | File[]) {
     if (isOcrRunningRef.current) {
       setStatus('Wait for the current screenshot scan to finish before adding more images.')
@@ -529,6 +557,7 @@ function App() {
             id: attachmentIdRef.current,
             name: sanitizeFileName(file.name),
             size: file.size,
+            ocrStatus: 'Initializing OCR...',
           },
         })
       }
@@ -546,37 +575,65 @@ function App() {
       if (accepted.length === 0) return
 
       const parsedFixtures: ParsedBetslipFixture[] = []
-      let scanErrors = 0
+      const scanErrors: string[] = []
       let cleanupError = false
+      let workerFailureReason: unknown
       let currentFileName = accepted[0].attachment.name
-      setOcrProgress({ fileName: currentFileName, percent: 0, stage: 'Preparing OCR' })
+      let currentAttachmentId = accepted[0].attachment.id
+      setOcrError('')
+      setRawScannedText('')
+      setOcrProgress({ attachmentId: currentAttachmentId, fileName: currentFileName, percent: 0, stage: 'Initializing OCR...' })
       let ocrWorker: Awaited<ReturnType<typeof createWorker>> | null = null
       try {
         ocrWorker = await createWorker('eng', 1, {
+          workerPath: new URL('ocr/worker.min.js', new URL(import.meta.env.BASE_URL, window.location.href)).href,
+          corePath: new URL('ocr/core/tesseract-core-lstm.wasm.js', new URL(import.meta.env.BASE_URL, window.location.href)).href,
+          langPath: new URL('ocr/lang/', new URL(import.meta.env.BASE_URL, window.location.href)).href,
+          gzip: true,
+          workerBlobURL: false,
+          errorHandler: (error: unknown) => { workerFailureReason = error },
           logger: ({ status: stage, progress }) => {
             const recognizing = stage.toLocaleLowerCase().includes('recognizing')
             const percent = recognizing ? Math.round(Math.max(0, Math.min(1, progress)) * 100) : 0
+            const visibleStage = recognizing ? `Scanning ${percent}%...` : `${stage.charAt(0).toUpperCase()}${stage.slice(1)}...`
             setOcrProgress((current) => ({
+              attachmentId: currentAttachmentId,
               fileName: currentFileName,
               percent: recognizing && current?.fileName === currentFileName
                 ? Math.max(current.percent, percent)
                 : percent,
-              stage,
+              stage: visibleStage,
             }))
+            updateAttachmentStatus(currentAttachmentId, visibleStage)
           },
         })
         for (const item of accepted) {
           currentFileName = item.attachment.name
-          setOcrProgress({ fileName: currentFileName, percent: 0, stage: 'Recognizing text' })
+          currentAttachmentId = item.attachment.id
+          setOcrProgress({ attachmentId: currentAttachmentId, fileName: currentFileName, percent: 0, stage: 'Scanning 0%...' })
+          updateAttachmentStatus(currentAttachmentId, 'Scanning 0%...')
           try {
             const { data } = await ocrWorker.recognize(item.file)
-            parsedFixtures.push(...parseBetslipText(data.text))
-          } catch {
-            scanErrors += 1
+            setOcrProgress({ attachmentId: currentAttachmentId, fileName: currentFileName, percent: 100, stage: 'Parsing lines...' })
+            updateAttachmentStatus(currentAttachmentId, 'Parsing lines...')
+            setRawScannedText((current) => {
+              const section = `--- ${item.attachment.name} ---\n${sanitizeBetText(data.text)}`
+              return [current, section].filter(Boolean).join('\n\n').slice(-MAX_OCR_TEXT_LENGTH)
+            })
+            const parsed = parseBetslipText(data.text)
+            parsedFixtures.push(...parsed)
+            updateAttachmentStatus(currentAttachmentId, `Extracted ${parsed.length} match${parsed.length === 1 ? '' : 'es'}`)
+          } catch (error) {
+            const details = errorDetails(error ?? workerFailureReason)
+            scanErrors.push(`${item.attachment.name}: ${details}`)
+            updateAttachmentStatus(currentAttachmentId, `OCR error: ${details}`)
           }
         }
-      } catch {
-        scanErrors += accepted.length
+      } catch (error) {
+        const details = errorDetails(error)
+        scanErrors.push(details)
+        accepted.forEach(({ attachment }) => updateAttachmentStatus(attachment.id, `OCR error: ${details}`))
+        setOcrError(details)
       } finally {
         if (ocrWorker) {
           try {
@@ -594,13 +651,14 @@ function App() {
       if (result.added > 0) summary.push(`${result.added} fixture${result.added === 1 ? '' : 's'} added to the board`)
       if (result.duplicates > 0) summary.push(`${result.duplicates} duplicate fixture${result.duplicates === 1 ? '' : 's'} skipped`)
       if (result.omitted > 0) summary.push(`${result.omitted} fixture${result.omitted === 1 ? '' : 's'} could not be added or selected due to pool limits`)
-      if (parsedFixtures.length === 0 && scanErrors === 0) summary.push('No matchups were recognized')
-      if (scanErrors > 0) summary.push(`${scanErrors} screenshot${scanErrors === 1 ? '' : 's'} could not be scanned`)
+      if (parsedFixtures.length === 0 && scanErrors.length === 0) summary.push('No matchups were recognized')
+      if (scanErrors.length > 0) summary.push(`${scanErrors.length} screenshot${scanErrors.length === 1 ? '' : 's'} could not be scanned`)
       if (cleanupError) summary.push('OCR worker cleanup failed')
       if (summary.length === 0) summary.push('No new fixtures were found')
       const defaultsNote = result.defaultRateFixtures > 0
         ? ` Goal rates defaulted to λ ${OCR_DEFAULT_LAMBDA.toFixed(2)} / μ ${OCR_DEFAULT_MU.toFixed(2)} for ${result.defaultRateFixtures} fixture${result.defaultRateFixtures === 1 ? '' : 's'}.`
         : ''
+      if (scanErrors.length > 0) setOcrError(scanErrors.join('\n'))
       setStatus(`OCR complete: ${summary.join('; ')}.${defaultsNote}`)
     } finally {
       isOcrRunningRef.current = false
@@ -1138,14 +1196,18 @@ function App() {
             </div>
             {ocrProgress && (
               <div className="ocr-progress" role="status" aria-live="polite">
-                <div className="ocr-progress__label"><span>{ocrProgress.stage.toLocaleLowerCase().includes('recognizing') ? 'Scanning image' : 'Preparing OCR'}: {ocrProgress.percent}%</span><span>{ocrProgress.fileName}</span></div>
+                <div className="ocr-progress__label"><span>{ocrProgress.stage}</span><span>{ocrProgress.fileName}</span></div>
                 <progress value={ocrProgress.percent} max={100} aria-label={`Scanning ${ocrProgress.fileName}`} />
-                <small>{ocrProgress.stage}</small>
               </div>
             )}
+            {ocrError && <div className="ocr-error" role="alert">OCR error: {ocrError}</div>}
+            <details className="raw-scan">
+              <summary>Raw Scanned Text</summary>
+              <pre>{rawScannedText || 'Scanned text will appear here after an image is processed.'}</pre>
+            </details>
             {attachedFiles.length > 0 && (
               <ul className="attachment-list" aria-label="Attached screenshots">
-                {attachedFiles.map((file) => <li key={file.id} title={`${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`}><FileImage size={14} /><span>{file.name}</span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => removeAttachment(file.id)}><Trash2 size={13} /></button></li>)}
+                {attachedFiles.map((file) => <li key={file.id} title={`${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`}><FileImage size={14} /><span className="attachment-name">{file.name}</span><span className={`attachment-status${file.ocrStatus.startsWith('OCR error:') ? ' is-error' : ''}`}>{file.ocrStatus}</span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => removeAttachment(file.id)}><Trash2 size={13} /></button></li>)}
               </ul>
             )}
             <label className="paste-label" htmlFor="bet-text">Paste selections or notes</label>
