@@ -1,6 +1,7 @@
 // Palette: #FAFAF8, #FFFFFF, #1A1A1A, #666660, #E5E5E0, #C85A32; type: Georgia + Inter/system sans.
 // Icons: Lucide outline set, monochrome, 1.5px stroke.
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
+import { createWorker } from 'tesseract.js'
 import {
   Activity,
   ArrowDownToLine,
@@ -42,6 +43,7 @@ import {
   type GeneratedSlip,
   type PermutationLeg,
 } from './engine/permutations'
+import { parseBetslipText, type ParsedBetslipFixture } from './engine/betslipParser'
 import './App.css'
 
 type Fixture = {
@@ -72,6 +74,17 @@ type AttachedScreenshot = {
   id: number
   name: string
   size: number
+}
+
+type VerifiedScreenshot = {
+  file: File
+  attachment: AttachedScreenshot
+}
+
+type OcrProgress = {
+  fileName: string
+  percent: number
+  stage: string
 }
 
 type CustomFixtureDraft = {
@@ -107,6 +120,8 @@ const DEFAULT_CUSTOM_ODDS: Record<Market, number> = {
   bttsYes: 1.85,
   bttsNo: 1.9,
 }
+const OCR_DEFAULT_LAMBDA = 1.65
+const OCR_DEFAULT_MU = 1.15
 
 const emptyCustomFixture: CustomFixtureDraft = {
   home: '',
@@ -315,6 +330,7 @@ function App() {
   const [slip, setSlip] = useState<SlipPick[]>([])
   const [betText, setBetText] = useState('')
   const [attachedFiles, setAttachedFiles] = useState<AttachedScreenshot[]>([])
+  const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
   const [simulation, setSimulation] = useState<MonteCarloResult | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [status, setStatus] = useState('')
@@ -323,6 +339,7 @@ function App() {
   const requestIdRef = useRef(0)
   const attachmentIdRef = useRef(0)
   const attachedFilesRef = useRef<AttachedScreenshot[]>([])
+  const isOcrRunningRef = useRef(false)
   const nextFixtureIdRef = useRef(1)
   const queueCancelledRef = useRef(false)
   const queueRunIdRef = useRef(0)
@@ -413,44 +430,181 @@ function App() {
     }
   }
 
+  function addParsedFixtures(parsedFixtures: ParsedBetslipFixture[]) {
+    const existing = new Set(fixturePool.map((fixture) => `${fixture.home.toLocaleLowerCase()}\u0000${fixture.away.toLocaleLowerCase()}`))
+    const unique = parsedFixtures.filter(({ home, away }) => {
+      const key = `${home.toLocaleLowerCase()}\u0000${away.toLocaleLowerCase()}`
+      if (existing.has(key)) return false
+      existing.add(key)
+      return true
+    })
+    const capacity = Math.max(0, MAX_FIXTURE_POOL_SIZE - fixturePool.length)
+    let defaultRateFixtures = 0
+    const fixturesToAdd = unique.slice(0, capacity).map((parsed) => {
+      const lambda = parsed.lambda ?? OCR_DEFAULT_LAMBDA
+      const mu = parsed.mu ?? OCR_DEFAULT_MU
+      if (parsed.lambda === undefined || parsed.mu === undefined) defaultRateFixtures += 1
+      const probabilities = calculateProbabilities(lambda, mu, rho)
+      const fallbackOdds: Record<Market, number> = {
+        ...DEFAULT_CUSTOM_ODDS,
+        home: Math.min(1000, 1 / probabilities.home),
+        draw: Math.min(1000, 1 / probabilities.draw),
+        away: Math.min(1000, 1 / probabilities.away),
+      }
+      for (const [index, market] of (['home', 'draw', 'away'] as const).entries()) {
+        const parsedOdds = parsed.odds[index]
+        if (parsedOdds !== undefined) fallbackOdds[market] = parsedOdds
+      }
+      const id = `ocr-${nextFixtureIdRef.current}`
+      nextFixtureIdRef.current += 1
+      return {
+        id,
+        competition: 'Scanned betslip',
+        kickoff: sanitizePlainText(parsed.kickoff, MAX_CUSTOM_KICKOFF_LENGTH) || 'Kickoff TBD',
+        home: sanitizePlainText(parsed.home, MAX_CUSTOM_TEAM_NAME_LENGTH),
+        away: sanitizePlainText(parsed.away, MAX_CUSTOM_TEAM_NAME_LENGTH),
+        homePrior: lambda,
+        awayPrior: mu,
+        homeRecent: lambda,
+        awayRecent: mu,
+        recentAgeDays: 0,
+        odds: fallbackOdds,
+      } satisfies Fixture
+    }).filter((fixture) => fixture.home && fixture.away && fixture.home !== fixture.away)
+
+    if (fixturesToAdd.length === 0) {
+      return { added: 0, duplicates: unique.length === 0 ? parsedFixtures.length : 0, omitted: unique.length, defaultRateFixtures: 0 }
+    }
+
+    const availableSelections = Math.max(0, MAX_PERMUTATION_FIXTURES - selectedFixtureIds.length)
+    const selectedFixtures = fixturesToAdd.slice(0, availableSelections)
+    setFixturePool((current) => [...current, ...fixturesToAdd])
+    if (selectedFixtures.length > 0) {
+      setSelectedFixtureIds((current) => [...current, ...selectedFixtures.map((fixture) => fixture.id)])
+      setSelectedMarkets((current) => {
+        const next = new Map(current)
+        selectedFixtures.forEach((fixture) => next.set(fixture.id, 'home'))
+        return next
+      })
+    }
+    cancelSimulation()
+    clearGeneratedSlips()
+    return {
+      added: fixturesToAdd.length,
+      duplicates: parsedFixtures.length - unique.length,
+      omitted: unique.length - fixturesToAdd.length + fixturesToAdd.length - selectedFixtures.length,
+      defaultRateFixtures,
+    }
+  }
+
   async function addFiles(fileList: FileList | File[]) {
+    if (isOcrRunningRef.current) {
+      setStatus('Wait for the current screenshot scan to finish before adding more images.')
+      return
+    }
+    isOcrRunningRef.current = true
     const files = Array.from(fileList)
-    const verified: AttachedScreenshot[] = []
+    const verified: VerifiedScreenshot[] = []
     let rejected = 0
     let inspectionErrors = 0
-    for (const file of files) {
-      if (!ALLOWED_IMAGE_TYPES.has(file.type) || file.size <= 0 || file.size > MAX_UPLOAD_BYTES) {
-        rejected += 1
-        continue
-      }
-      try {
-        if (!await hasSupportedImageSignature(file)) {
+    try {
+      for (const file of files) {
+        if (!ALLOWED_IMAGE_TYPES.has(file.type) || file.size <= 0 || file.size > MAX_UPLOAD_BYTES) {
           rejected += 1
           continue
         }
-      } catch {
-        inspectionErrors += 1
-        continue
+        try {
+          if (!await hasSupportedImageSignature(file)) {
+            rejected += 1
+            continue
+          }
+        } catch {
+          inspectionErrors += 1
+          continue
+        }
+        attachmentIdRef.current += 1
+        verified.push({
+          file,
+          attachment: {
+            id: attachmentIdRef.current,
+            name: sanitizeFileName(file.name),
+            size: file.size,
+          },
+        })
       }
-      attachmentIdRef.current += 1
-      verified.push({
-        id: attachmentIdRef.current,
-        name: sanitizeFileName(file.name),
-        size: file.size,
-      })
+      const available = Math.max(0, MAX_SCREENSHOTS - attachedFilesRef.current.length)
+      const accepted = verified.slice(0, available)
+      const capped = verified.length - accepted.length
+      attachedFilesRef.current = [...attachedFilesRef.current, ...accepted.map(({ attachment }) => attachment)]
+      setAttachedFiles(attachedFilesRef.current)
+      const messages: string[] = []
+      if (accepted.length > 0) messages.push(`${accepted.length} verified screenshot${accepted.length === 1 ? '' : 's'} attached`)
+      if (rejected > 0) messages.push(`${rejected} file${rejected === 1 ? '' : 's'} rejected (PNG, JPEG or WebP up to 10 MB only)`)
+      if (capped > 0) messages.push(`maximum ${MAX_SCREENSHOTS} screenshots allowed`)
+      if (inspectionErrors > 0) messages.push(`${inspectionErrors} file${inspectionErrors === 1 ? '' : 's'} could not be inspected`)
+      if (messages.length > 0) setStatus(messages.join('. ') + '.')
+      if (accepted.length === 0) return
+
+      const parsedFixtures: ParsedBetslipFixture[] = []
+      let scanErrors = 0
+      let cleanupError = false
+      let currentFileName = accepted[0].attachment.name
+      setOcrProgress({ fileName: currentFileName, percent: 0, stage: 'Preparing OCR' })
+      let ocrWorker: Awaited<ReturnType<typeof createWorker>> | null = null
+      try {
+        ocrWorker = await createWorker('eng', 1, {
+          logger: ({ status: stage, progress }) => {
+            const recognizing = stage.toLocaleLowerCase().includes('recognizing')
+            const percent = recognizing ? Math.round(Math.max(0, Math.min(1, progress)) * 100) : 0
+            setOcrProgress((current) => ({
+              fileName: currentFileName,
+              percent: recognizing && current?.fileName === currentFileName
+                ? Math.max(current.percent, percent)
+                : percent,
+              stage,
+            }))
+          },
+        })
+        for (const item of accepted) {
+          currentFileName = item.attachment.name
+          setOcrProgress({ fileName: currentFileName, percent: 0, stage: 'Recognizing text' })
+          try {
+            const { data } = await ocrWorker.recognize(item.file)
+            parsedFixtures.push(...parseBetslipText(data.text))
+          } catch {
+            scanErrors += 1
+          }
+        }
+      } catch {
+        scanErrors += accepted.length
+      } finally {
+        if (ocrWorker) {
+          try {
+            await ocrWorker.terminate()
+          } catch {
+            cleanupError = true
+          }
+        }
+        setOcrProgress(null)
+        isOcrRunningRef.current = false
+      }
+
+      const result = addParsedFixtures(parsedFixtures)
+      const summary: string[] = []
+      if (result.added > 0) summary.push(`${result.added} fixture${result.added === 1 ? '' : 's'} added to the board`)
+      if (result.duplicates > 0) summary.push(`${result.duplicates} duplicate fixture${result.duplicates === 1 ? '' : 's'} skipped`)
+      if (result.omitted > 0) summary.push(`${result.omitted} fixture${result.omitted === 1 ? '' : 's'} could not be added or selected due to pool limits`)
+      if (parsedFixtures.length === 0 && scanErrors === 0) summary.push('No matchups were recognized')
+      if (scanErrors > 0) summary.push(`${scanErrors} screenshot${scanErrors === 1 ? '' : 's'} could not be scanned`)
+      if (cleanupError) summary.push('OCR worker cleanup failed')
+      if (summary.length === 0) summary.push('No new fixtures were found')
+      const defaultsNote = result.defaultRateFixtures > 0
+        ? ` Goal rates defaulted to λ ${OCR_DEFAULT_LAMBDA.toFixed(2)} / μ ${OCR_DEFAULT_MU.toFixed(2)} for ${result.defaultRateFixtures} fixture${result.defaultRateFixtures === 1 ? '' : 's'}.`
+        : ''
+      setStatus(`OCR complete: ${summary.join('; ')}.${defaultsNote}`)
+    } finally {
+      isOcrRunningRef.current = false
     }
-    const available = Math.max(0, MAX_SCREENSHOTS - attachedFilesRef.current.length)
-    const accepted = verified.slice(0, available)
-    const capped = verified.length - accepted.length
-    attachedFilesRef.current = [...attachedFilesRef.current, ...accepted]
-    setAttachedFiles(attachedFilesRef.current)
-    const messages: string[] = []
-    if (accepted.length > 0) messages.push(`${accepted.length} verified screenshot${accepted.length === 1 ? '' : 's'} attached`)
-    if (rejected > 0) messages.push(`${rejected} file${rejected === 1 ? '' : 's'} rejected (PNG, JPEG or WebP up to 10 MB only)`)
-    if (capped > 0) messages.push(`maximum ${MAX_SCREENSHOTS} screenshots allowed`)
-    if (inspectionErrors > 0) messages.push(`${inspectionErrors} file${inspectionErrors === 1 ? '' : 's'} could not be inspected`)
-    if (accepted.length > 0) messages.push('Enter extracted picks below to add them to the slip')
-    if (messages.length > 0) setStatus(messages.join('. ') + '.')
   }
 
   function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
@@ -979,9 +1133,16 @@ function App() {
             >
               <Upload size={18} />
               <span>Drop a screenshot or <b>browse files</b></span>
-              <small>PNG, JPG or WEBP · image is not auto-read</small>
+              <small>PNG, JPG or WEBP · OCR runs locally in your browser</small>
               <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" multiple hidden onChange={(event) => { if (event.target.files) void addFiles(event.target.files); event.target.value = '' }} />
             </div>
+            {ocrProgress && (
+              <div className="ocr-progress" role="status" aria-live="polite">
+                <div className="ocr-progress__label"><span>{ocrProgress.stage.toLocaleLowerCase().includes('recognizing') ? 'Scanning image' : 'Preparing OCR'}: {ocrProgress.percent}%</span><span>{ocrProgress.fileName}</span></div>
+                <progress value={ocrProgress.percent} max={100} aria-label={`Scanning ${ocrProgress.fileName}`} />
+                <small>{ocrProgress.stage}</small>
+              </div>
+            )}
             {attachedFiles.length > 0 && (
               <ul className="attachment-list" aria-label="Attached screenshots">
                 {attachedFiles.map((file) => <li key={file.id} title={`${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`}><FileImage size={14} /><span>{file.name}</span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => removeAttachment(file.id)}><Trash2 size={13} /></button></li>)}
@@ -989,7 +1150,7 @@ function App() {
             )}
             <label className="paste-label" htmlFor="bet-text">Paste selections or notes</label>
             <textarea id="bet-text" value={betText} maxLength={MAX_PASTED_TEXT_LENGTH} onChange={(event) => setBetText(sanitizeBetText(event.target.value))} onPaste={handlePaste} placeholder={'Arsenal — Over 2.5 — 1.76\nPaste your betslip text here'} rows={3} />
-            <p className="intake-note">Images are attached for reference only. Compare the parsed prices against the fixture board before adding a selection.</p>
+            <p className="intake-note">Recognized matchups are added to the fixture board and permutation pool. Review OCR team names and prices before use.</p>
           </section>
 
           <section className="slip-section" aria-labelledby="slip-heading">

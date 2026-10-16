@@ -659,6 +659,38 @@ h2 {
   list-style: none;
 }
 
+.ocr-progress {
+  padding: 10px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.ocr-progress__label {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.ocr-progress__label span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ocr-progress progress {
+  display: block;
+  width: 100%;
+  height: 4px;
+  accent-color: var(--accent);
+}
+
+.ocr-progress small {
+  display: block;
+  margin-top: 4px;
+  font-size: 8px;
+}
+
 .attachment-list li {
   display: flex;
   align-items: center;

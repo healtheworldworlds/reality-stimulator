@@ -24,7 +24,7 @@ The matrix is normalized before deriving 1X2, Over/Under 1.5 and 2.5, and BTTS p
 
 ## Prototype inputs
 
-Fixture rates and bookmaker odds in `src/App.tsx` are illustrative static examples, not live feeds. The half-life control blends those recent-form example rates against their priors. Screenshot intake only attaches images for reference; it does not perform OCR or automatically add extracted picks.
+Fixture rates and bookmaker odds in `src/App.tsx` are illustrative static examples, not live feeds. The half-life control blends those recent-form example rates against their priors. The screenshot intake verifies PNG, JPEG and WebP images before running English Tesseract OCR locally in the browser. Recognized matchups are added to the fixture board and permutation pool; unprinted goal rates default to λ 1.65 / μ 1.15. OCR output and inferred prices should be reviewed before use.
 
 ## Custom fixtures and permutations
 
@@ -35,7 +35,7 @@ The “SportyBet reference codes” queue is intentionally a local demonstration
 ## Security notes
 
 - Vite exposes only `VITE_`-prefixed environment variables to browser code. Treat every such variable as public; do not put credentials or service-role keys in client environment files.
-- Betslip images are limited to PNG, JPEG or WebP, checked against their file signatures, limited to 10 MB each and five attachments total. Only sanitized filenames and sizes are retained; the image bytes are not uploaded or decoded.
+- Betslip images are limited to PNG, JPEG or WebP, checked against their file signatures, limited to 10 MB each and five attachments total. OCR processing runs in a browser worker; image bytes are not uploaded. Tesseract worker and language data are fetched from jsDelivr.
 - Pasted notes are control-character filtered and capped at 5,000 characters. Notes and filenames are rendered as text, never as HTML.
 - Rates, ρ, half-life, odds and simulation dimensions have engine-side bounds. Monte Carlo runs are capped at 100,000, with total fixture/pick trial budgets, and execute in a module Web Worker.
 - Vite dev/preview responses and the static-host `public/_headers` configuration set CSP and browser security headers. Development CSP permits Vite/React Refresh inline scripts and styles for HMR; production CSP permits neither.
