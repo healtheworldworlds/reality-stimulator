@@ -34,6 +34,7 @@ The “SportyBet reference codes” queue is intentionally a local demonstration
 
 ## Security notes
 
+- The workbench passcode is verified against a salted SHA-256 digest and an unlocked flag is remembered in localStorage. This is a client-side privacy gate only, not authentication or access control: users can inspect or modify a client bundle and localStorage. Use server-side authentication to protect sensitive data.
 - Vite exposes only `VITE_`-prefixed environment variables to browser code. Treat every such variable as public; do not put credentials or service-role keys in client environment files.
 - Betslip images are limited to PNG, JPEG or WebP, checked against their file signatures, limited to 10 MB each and five attachments total. OCR processing runs in a same-origin browser worker; image bytes are not uploaded. The pinned Tesseract.js 7.0.0 worker/core and `@tesseract.js-data/eng` 1.0.0 language model are served from `public/ocr`, avoiding runtime CDN/CORS dependencies. If worker, WASM or language initialization fails, the intake shows the OCR error details.
 - Pasted notes are control-character filtered and capped at 5,000 characters. Notes and filenames are rendered as text, never as HTML.

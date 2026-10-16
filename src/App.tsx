@@ -17,6 +17,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
+import { verifyPasscode } from './security/passcode'
 import {
   calculateProbabilities,
   expectedValue,
@@ -311,7 +312,86 @@ function selectionProbability(probabilities: MarketProbabilities, market: Market
   return probabilities[marketForSelection[market]]
 }
 
+const AUTH_STORAGE_KEY = 'reality-simulator:unlocked'
+
+function getStoredAuthentication() {
+  try {
+    return window.localStorage.getItem(AUTH_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function PasscodeLock({ onUnlock }: { onUnlock: () => void }) {
+  const [passcode, setPasscode] = useState('')
+  const [message, setMessage] = useState('')
+  const [isChecking, setIsChecking] = useState(false)
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (isChecking) return
+    setIsChecking(true)
+    setMessage('')
+    try {
+      if (!await verifyPasscode(passcode)) {
+        setMessage('Incorrect passcode')
+        setPasscode('')
+        return
+      }
+      try {
+        window.localStorage.setItem(AUTH_STORAGE_KEY, 'true')
+      } catch {
+        setMessage('Could not save this device session. Check browser storage settings and try again.')
+        return
+      }
+      onUnlock()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Passcode verification failed.')
+    } finally {
+      setIsChecking(false)
+    }
+  }
+
+  return (
+    <main className="lock-screen">
+      <section className="lock-panel" aria-labelledby="lock-heading">
+        <p className="lock-eyebrow">Reality Simulator · Private Workbench</p>
+        <div className="lock-rule" />
+        <h1 id="lock-heading">A considered pause<br />before the numbers.</h1>
+        <p className="lock-description">Enter your passcode to open the modelling workbench.</p>
+        <form className="lock-form" onSubmit={handleSubmit}>
+          <label htmlFor="workbench-passcode">Passcode</label>
+          <input
+            id="workbench-passcode"
+            type="password"
+            value={passcode}
+            onChange={(event) => { setPasscode(event.target.value); setMessage('') }}
+            autoComplete="current-password"
+            autoFocus
+            maxLength={64}
+            required
+            aria-invalid={message === 'Incorrect passcode'}
+            aria-describedby={message ? 'passcode-message' : undefined}
+          />
+          {message && <p className="lock-message" id="passcode-message" role="alert">{message}</p>}
+          <button type="submit" disabled={isChecking || passcode.length === 0}>
+            {isChecking ? 'Checking…' : 'Unlock workbench'}
+          </button>
+        </form>
+        <p className="lock-footnote">Access is remembered on this device.</p>
+      </section>
+    </main>
+  )
+}
+
 function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(getStoredAuthentication)
+  return isAuthenticated
+    ? <Workbench />
+    : <PasscodeLock onUnlock={() => setIsAuthenticated(true)} />
+}
+
+function Workbench() {
   const [halfLifeDays, setHalfLifeDays] = useState(30)
   const [rho, setRho] = useState(-0.05)
   const [runs, setRuns] = useState(25000)
