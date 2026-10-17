@@ -28,6 +28,7 @@ import {
   type MarketProbabilities,
   type MarketSelection,
 } from './engine/simulation'
+import { generateKickoffTimes, generateUniqueClubMatchups } from './engine/clubs'
 import { parseBatchMatchList, parseBetslipText, type ParsedBetslipFixture } from './engine/betslipParser'
 import './App.css'
 
@@ -123,8 +124,6 @@ const automatedMarketLabels: Record<AutomatedMarket, string> = {
   over25: 'Over 2.5 Goals',
 }
 
-const GENERATED_CLUBS = Array.from({ length: 60 }, (_, index) => `Generated Club ${String(index + 1).padStart(2, '0')}`)
-
 function allocateHalfGoals(homeGoals: number, awayGoals: number, secondHalfShare: number) {
   let firstHalfGoals = 0
   let secondHalfGoals = 0
@@ -145,12 +144,6 @@ function parseClockTime(value: string) {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value)
   if (!match) return null
   return Number(match[1]) * 60 + Number(match[2])
-}
-
-function kickoffInWindow(index: number, count: number, start: number, end: number) {
-  const duration = end >= start ? end - start : end + 1440 - start
-  const minute = (start + Math.floor(((index + 0.5) / count) * duration)) % 1440
-  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
 }
 
 const fixtures: Fixture[] = [
@@ -549,12 +542,14 @@ function Workbench() {
       return
     }
     const probabilities = calculateProbabilities(calibration.lambda, calibration.mu, rho)
-    const generated = Array.from({ length: count }, (_, index): Fixture => ({
+    const matchups = generateUniqueClubMatchups(count)
+    const kickoffTimes = generateKickoffTimes(count, start, end)
+    const generated = matchups.map((matchup, index): Fixture => ({
       id: `market-gen-${nextFixtureIdRef.current++}`,
-      competition: 'Generated sample',
-      kickoff: kickoffInWindow(index, count, start, end),
-      home: GENERATED_CLUBS[index * 2],
-      away: GENERATED_CLUBS[index * 2 + 1],
+      competition: matchup.competition,
+      kickoff: kickoffTimes[index],
+      home: matchup.home,
+      away: matchup.away,
       homePrior: calibration.lambda,
       awayPrior: calibration.mu,
       homeRecent: calibration.lambda,
@@ -580,7 +575,7 @@ function Workbench() {
     setRoundMarket(generatorMarket)
     setRoundSecondHalfShare(calibration.secondHalfShare)
     setMarketGeneratorSummary(
-      `${count} synthetic matches · ${automatedMarketLabels[generatorMarket]} model odds ${calibration.odds.toFixed(3)} · λ ${calibration.lambda.toFixed(2)} / μ ${calibration.mu.toFixed(2)}${generatorMarket === 'secondHalfHighest' ? ` · second-half allocation ${(calibration.secondHalfShare * 100).toFixed(1)}%` : ''}.`,
+      `${count} sample matches · ${automatedMarketLabels[generatorMarket]} model odds ${calibration.odds.toFixed(3)} · λ ${calibration.lambda.toFixed(2)} / μ ${calibration.mu.toFixed(2)}${generatorMarket === 'secondHalfHighest' ? ` · second-half allocation ${(calibration.secondHalfShare * 100).toFixed(1)}%` : ''}.`,
     )
     setStatus(`${count} generated matches added to the round lineup in kickoff order.`)
   }
@@ -1212,7 +1207,7 @@ function Workbench() {
                 <Plus size={14} /> Generate Matches
               </button>
             </form>
-            <p className="market-generator__note">Generated club names and kickoff times are illustrative samples, not a live fixture feed. Overnight windows are supported.</p>
+            <p className="market-generator__note">Generated matchups use real club names but are not scheduled fixtures. Kickoff times are illustrative, not a live fixture feed. Overnight windows are supported.</p>
             {marketGeneratorSummary && <p className={`market-generator__summary${marketGeneratorSummary.startsWith('The model could not') || marketGeneratorSummary.startsWith('Choose') || marketGeneratorSummary.startsWith('Enter') ? ' is-error' : ''}`} role="status" aria-live="polite">{marketGeneratorSummary}</p>}
           </section>
 
@@ -1294,7 +1289,7 @@ function Workbench() {
         <div className="method-copy">
           <p>Independent Poisson goal rates form the score matrix. Dixon–Coles τ corrections adjust the four low-scoring outcomes, then the normalized matrix yields 1X2, totals and BTTS probabilities.</p>
           <p>Each round draws one independent scoreline per selected fixture from its corrected Dixon–Coles matrix. The second-half market allocates each goal to a half at the calibrated share; a tie is not a second-half win. The fixture lineup remains fixed between rounds so outcomes can be regenerated and copied.</p>
-          <p>The automated generator calibrates model odds inside the requested range and creates synthetic club names and kickoff times. All fixture inputs and prices in this prototype are examples, not a live data feed.</p>
+          <p>The automated generator calibrates model odds inside the requested range and pairs real club names into illustrative, unscheduled matchups. Kickoff times are generated within the selected window. All fixture inputs and prices in this prototype are examples, not a live data feed.</p>
         </div>
       </section>
       <footer className="page-footer"><span>Reality Simulator</span><span>Research prototype · Model outputs are estimates</span></footer>
