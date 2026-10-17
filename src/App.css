@@ -977,8 +977,23 @@ h2 {
   border-bottom: 1px solid var(--border);
 }
 
+.round-fixture__title {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+}
+
+.round-fixture__index {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
 .round-fixture__head strong {
   overflow: hidden;
+  min-width: 0;
   color: var(--text);
   font-size: 10px;
   font-weight: 600;

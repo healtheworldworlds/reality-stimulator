@@ -418,12 +418,14 @@ function Workbench() {
       ? { ...parsed, ...fitGoalRates(parsed.odds) }
       : parsed)
     const result = addParsedFixtures(withRates)
-    const existingIds = withRates.flatMap(({ home, away }) => {
-      const match = fixturePool.find((fixture) => fixture.home.toLocaleLowerCase() === home.toLocaleLowerCase() && fixture.away.toLocaleLowerCase() === away.toLocaleLowerCase())
+    const loadedFixtures = [...fixturePool, ...result.fixtures]
+    const orderedIds = withRates.flatMap(({ home, away }) => {
+      const match = loadedFixtures.find((fixture) => fixture.home.toLocaleLowerCase() === home.toLocaleLowerCase() && fixture.away.toLocaleLowerCase() === away.toLocaleLowerCase())
       return match ? [match.id] : []
     })
-    if (existingIds.length > 0) setRoundFixtureIds((current) => [...current, ...existingIds.filter((id) => !current.includes(id))])
-    const total = result.added + existingIds.length
+    const orderedUniqueIds = [...new Set(orderedIds)]
+    setRoundFixtureIds((current) => [...current.filter((id) => !orderedUniqueIds.includes(id)), ...orderedUniqueIds])
+    const total = orderedUniqueIds.length
     const notes = [`${total} match${total === 1 ? '' : 'es'} loaded into the board and round lineup`]
     if (result.omitted > 0) notes.push(`${result.omitted} skipped because the fixture pool is full`)
     setStatus(`${notes.join('; ')}. Click Generate Round Results to simulate.`)
@@ -469,7 +471,7 @@ function Workbench() {
       setStatus('Generate a round before copying its outcomes.')
       return
     }
-    const lines = roundFixtureIds.flatMap((id) => {
+    const lines = roundFixtureIds.flatMap((id, index) => {
       const fixture = preparedFixtures.find((item) => item.id === id)
       const result = roundResults.get(id)
       if (!fixture || !result) return []
@@ -479,7 +481,7 @@ function Workbench() {
         : result.homeGoals === result.awayGoals ? 'Draw' : 'Away Win'
       const totals = (line: number) => totalGoals > line ? `Over ${line}.5` : `Under ${line}.5`
       const bothScored = result.homeGoals > 0 && result.awayGoals > 0 ? 'GG' : 'NG'
-      return [`${fixture.home} vs ${fixture.away} | ${result.homeGoals} - ${result.awayGoals} | ${outcome} | ${totals(1)} | ${totals(2)} | ${bothScored}`]
+      return [`${index + 1}. ${fixture.home} vs ${fixture.away}: ${result.homeGoals}-${result.awayGoals} (${[outcome, totals(1), totals(2), bothScored].join(', ')})`]
     })
     try {
       await navigator.clipboard.writeText([`Round ${roundNumber}`, ...lines].join('\n'))
@@ -536,7 +538,7 @@ function Workbench() {
     }).filter((fixture) => fixture.home && fixture.away && fixture.home !== fixture.away)
 
     if (fixturesToAdd.length === 0) {
-      return { added: 0, duplicates: unique.length === 0 ? parsedFixtures.length : 0, omitted: unique.length, defaultRateFixtures: 0 }
+      return { added: 0, duplicates: unique.length === 0 ? parsedFixtures.length : 0, omitted: unique.length, defaultRateFixtures: 0, fixtures: [] }
     }
 
     setFixturePool((current) => [...current, ...fixturesToAdd])
@@ -546,6 +548,7 @@ function Workbench() {
       duplicates: parsedFixtures.length - unique.length,
       omitted: unique.length - fixturesToAdd.length,
       defaultRateFixtures,
+      fixtures: fixturesToAdd,
     }
   }
 
@@ -1050,7 +1053,7 @@ function Workbench() {
                   <div className="empty-slip"><p>Add matches from the fixture board or scan a betslip to build your round lineup.</p></div>
                 ) : (
                   <div className="round-fixtures" aria-live="polite">
-                    {roundFixtureIds.map((fixtureId) => {
+                    {roundFixtureIds.map((fixtureId, index) => {
                       const fixture = preparedFixtures.find((item) => item.id === fixtureId)
                       if (!fixture) return null
                       const result = roundResults.get(fixtureId)
@@ -1067,7 +1070,10 @@ function Workbench() {
                       return (
                         <article className="round-fixture" key={fixture.id}>
                           <div className="round-fixture__head">
-                            <strong>{fixture.home} vs {fixture.away}</strong>
+                            <div className="round-fixture__title">
+                              <span className="round-fixture__index">{index + 1}.</span>
+                              <strong>{fixture.home} vs {fixture.away}</strong>
+                            </div>
                             <button className="icon-button" type="button" onClick={() => toggleRoundFixture(fixture.id)} aria-label={`Remove ${fixture.home} versus ${fixture.away} from round lineup`}><Trash2 size={13} /></button>
                           </div>
                           <div className="round-fixture__score" aria-label={result ? `Simulated final score ${result.homeGoals} to ${result.awayGoals}` : 'Score pending'}>
