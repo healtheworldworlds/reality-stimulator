@@ -29,6 +29,7 @@ import {
   type MarketSelection,
 } from './engine/simulation'
 import { generateKickoffTimes, generateUniqueClubMatchups } from './engine/clubs'
+import { fetchTodaysFixtures, type LiveFixture } from './api/fixtures'
 import { parseBatchMatchList, parseBetslipText, type ParsedBetslipFixture } from './engine/betslipParser'
 import './App.css'
 
@@ -144,6 +145,22 @@ function parseClockTime(value: string) {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value)
   if (!match) return null
   return Number(match[1]) * 60 + Number(match[2])
+}
+
+function selectLiveFixtures(fixtures: LiveFixture[], count: number, startMinute: number) {
+  const shuffled = [...fixtures]
+  for (let index = 0; index < Math.min(count, shuffled.length); index += 1) {
+    const swapIndex = index + Math.floor(Math.random() * (shuffled.length - index))
+    ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
+  }
+  return shuffled.slice(0, count).sort((left, right) => {
+    const minuteOfDay = (time: string) => {
+      const [hours, minutes] = time.split(':').map(Number)
+      return hours * 60 + minutes
+    }
+    return (minuteOfDay(left.kickoff) - startMinute + 1440) % 1440 -
+      (minuteOfDay(right.kickoff) - startMinute + 1440) % 1440
+  })
 }
 
 const fixtures: Fixture[] = [
@@ -403,6 +420,7 @@ function Workbench() {
   const [kickoffEnd, setKickoffEnd] = useState('00:00')
   const [roundSecondHalfShare, setRoundSecondHalfShare] = useState(0.56)
   const [marketGeneratorSummary, setMarketGeneratorSummary] = useState('')
+  const [isGeneratingMatches, setIsGeneratingMatches] = useState(false)
   const [roundFixtureIds, setRoundFixtureIds] = useState<string[]>([])
   const [roundNumber, setRoundNumber] = useState(0)
   const [roundResults, setRoundResults] = useState<Map<string, RoundResult>>(() => new Map())
@@ -516,7 +534,7 @@ function Workbench() {
     setStatus(`Round ${roundNumber + 1} generated for ${selected.length} match${selected.length === 1 ? '' : 'es'}.`)
   }
 
-  function generateMarketMatches(event: FormEvent<HTMLFormElement>) {
+  async function generateMarketMatches(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const count = Number(matchCount)
     const min = Number(minimumOdds)
@@ -542,42 +560,65 @@ function Workbench() {
       return
     }
     const probabilities = calculateProbabilities(calibration.lambda, calibration.mu, rho)
-    const matchups = generateUniqueClubMatchups(count)
-    const kickoffTimes = generateKickoffTimes(count, start, end)
-    const generated = matchups.map((matchup, index): Fixture => ({
-      id: `market-gen-${nextFixtureIdRef.current++}`,
-      competition: matchup.competition,
-      kickoff: kickoffTimes[index],
-      home: matchup.home,
-      away: matchup.away,
-      homePrior: calibration.lambda,
-      awayPrior: calibration.mu,
-      homeRecent: calibration.lambda,
-      awayRecent: calibration.mu,
-      recentAgeDays: 0,
-      odds: {
-        ...DEFAULT_CUSTOM_ODDS,
-        home: 1 / probabilities.home,
-        draw: 1 / probabilities.draw,
-        away: 1 / probabilities.away,
-        over15: 1 / probabilities.over15,
-        under15: 1 / probabilities.under15,
-        over25: 1 / probabilities.over25,
-        under25: 1 / probabilities.under25,
-        bttsYes: 1 / probabilities.bttsYes,
-        bttsNo: 1 / probabilities.bttsNo,
-      },
-    }))
-    setGeneratedFixtures(generated)
-    setRoundFixtureIds(generated.map((fixture) => fixture.id))
-    setRoundResults(new Map())
-    setRoundNumber(0)
-    setRoundMarket(generatorMarket)
-    setRoundSecondHalfShare(calibration.secondHalfShare)
-    setMarketGeneratorSummary(
-      `${count} sample matches · ${automatedMarketLabels[generatorMarket]} model odds ${calibration.odds.toFixed(3)} · λ ${calibration.lambda.toFixed(2)} / μ ${calibration.mu.toFixed(2)}${generatorMarket === 'secondHalfHighest' ? ` · second-half allocation ${(calibration.secondHalfShare * 100).toFixed(1)}%` : ''}.`,
-    )
-    setStatus(`${count} generated matches added to the round lineup in kickoff order.`)
+    setIsGeneratingMatches(true)
+    try {
+      const liveResult = await fetchTodaysFixtures(start, end)
+      const liveMatchups = liveResult.status === 'available'
+        ? selectLiveFixtures(liveResult.fixtures, count, start)
+        : []
+      const useLiveFixtures = liveMatchups.length > 0
+      const fallbackKickoffTimes = useLiveFixtures ? [] : generateKickoffTimes(count, start, end)
+      const matchups: Array<{ competition: string; home: string; away: string; kickoff: string; generatedId: string }> = useLiveFixtures
+        ? liveMatchups.map((matchup) => ({
+            ...matchup,
+            generatedId: `market-api-${matchup.id}`,
+          }))
+        : generateUniqueClubMatchups(count).map((matchup, index) => ({
+            ...matchup,
+            kickoff: fallbackKickoffTimes[index],
+            generatedId: `market-gen-${nextFixtureIdRef.current++}`,
+          }))
+      const generated = matchups.map((matchup): Fixture => ({
+        id: matchup.generatedId,
+        competition: matchup.competition,
+        kickoff: matchup.kickoff,
+        home: matchup.home,
+        away: matchup.away,
+        homePrior: calibration.lambda,
+        awayPrior: calibration.mu,
+        homeRecent: calibration.lambda,
+        awayRecent: calibration.mu,
+        recentAgeDays: 0,
+        odds: {
+          ...DEFAULT_CUSTOM_ODDS,
+          home: 1 / probabilities.home,
+          draw: 1 / probabilities.draw,
+          away: 1 / probabilities.away,
+          over15: 1 / probabilities.over15,
+          under15: 1 / probabilities.under15,
+          over25: 1 / probabilities.over25,
+          under25: 1 / probabilities.under25,
+          bttsYes: 1 / probabilities.bttsYes,
+          bttsNo: 1 / probabilities.bttsNo,
+        },
+      }))
+      setGeneratedFixtures(generated)
+      setRoundFixtureIds(generated.map((fixture) => fixture.id))
+      setRoundResults(new Map())
+      setRoundNumber(0)
+      setRoundMarket(generatorMarket)
+      setRoundSecondHalfShare(calibration.secondHalfShare)
+      const fallbackReason = liveResult.status === 'fallback' ? liveResult.reason : 'no-matches'
+      const source = useLiveFixtures
+        ? `Using ${generated.length}${generated.length < count ? ` of ${count} requested` : ''} live fixtures`
+        : `Using registry fallback (${fallbackReason === 'no-matches' ? 'no live matches in this window' : 'live API unavailable or server key not configured'})`
+      setMarketGeneratorSummary(
+        `${source} · ${automatedMarketLabels[generatorMarket]} model odds ${calibration.odds.toFixed(3)} · λ ${calibration.lambda.toFixed(2)} / μ ${calibration.mu.toFixed(2)}${generatorMarket === 'secondHalfHighest' ? ` · second-half allocation ${(calibration.secondHalfShare * 100).toFixed(1)}%` : ''}.`,
+      )
+      setStatus(`${generated.length} ${useLiveFixtures ? 'live' : 'sample'} matches added to the round lineup in kickoff order.`)
+    } finally {
+      setIsGeneratingMatches(false)
+    }
   }
 
   async function copyRoundOutcomes() {
@@ -1203,11 +1244,11 @@ function Workbench() {
                   <input type="time" value={kickoffEnd} onChange={(event) => setKickoffEnd(event.target.value)} required />
                 </label>
               </div>
-              <button className="run-button market-generator__submit" type="submit">
-                <Plus size={14} /> Generate Matches
+              <button className="run-button market-generator__submit" type="submit" disabled={isGeneratingMatches}>
+                <Plus size={14} /> {isGeneratingMatches ? 'Fetching today’s fixtures…' : 'Generate Matches'}
               </button>
             </form>
-            <p className="market-generator__note">Generated matchups use real club names but are not scheduled fixtures. Kickoff times are illustrative, not a live fixture feed. Overnight windows are supported.</p>
+            <p className="market-generator__note">Uses today’s API-Football fixtures in UTC when available. If the API is unavailable, registry fallback pairings and kickoff times are illustrative, not scheduled fixtures.</p>
             {marketGeneratorSummary && <p className={`market-generator__summary${marketGeneratorSummary.startsWith('The model could not') || marketGeneratorSummary.startsWith('Choose') || marketGeneratorSummary.startsWith('Enter') ? ' is-error' : ''}`} role="status" aria-live="polite">{marketGeneratorSummary}</p>}
           </section>
 
@@ -1289,7 +1330,7 @@ function Workbench() {
         <div className="method-copy">
           <p>Independent Poisson goal rates form the score matrix. Dixon–Coles τ corrections adjust the four low-scoring outcomes, then the normalized matrix yields 1X2, totals and BTTS probabilities.</p>
           <p>Each round draws one independent scoreline per selected fixture from its corrected Dixon–Coles matrix. The second-half market allocates each goal to a half at the calibrated share; a tie is not a second-half win. The fixture lineup remains fixed between rounds so outcomes can be regenerated and copied.</p>
-          <p>The automated generator calibrates model odds inside the requested range and pairs real club names into illustrative, unscheduled matchups. Kickoff times are generated within the selected window. All fixture inputs and prices in this prototype are examples, not a live data feed.</p>
+          <p>The automated generator calibrates model odds inside the requested range and uses scheduled API-Football fixtures when available. Its offline registry fallback creates illustrative, unscheduled matchups. Kickoff times and availability depend on the selected UTC window. All model prices in this prototype are estimates, not bookmaker odds.</p>
         </div>
       </section>
       <footer className="page-footer"><span>Reality Simulator</span><span>Research prototype · Model outputs are estimates</span></footer>
