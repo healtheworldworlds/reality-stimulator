@@ -29,6 +29,7 @@ import {
   type MarketSelection,
 } from './engine/simulation'
 import { generateKickoffTimes, generateUniqueClubMatchups } from './engine/clubs'
+import { formatKickoff, kickoffDateForToday } from './engine/kickoff'
 import { fetchTodaysFixtures, type LiveFixture } from './api/fixtures'
 import { parseBatchMatchList, parseBetslipText, type ParsedBetslipFixture } from './engine/betslipParser'
 import './App.css'
@@ -37,6 +38,7 @@ type Fixture = {
   id: string
   competition: string
   kickoff: string
+  kickoffDate?: string
   home: string
   away: string
   homePrior: number
@@ -568,7 +570,7 @@ function Workbench() {
         : []
       const useLiveFixtures = liveMatchups.length > 0
       const fallbackKickoffTimes = useLiveFixtures ? [] : generateKickoffTimes(count, start, end)
-      const matchups: Array<{ competition: string; home: string; away: string; kickoff: string; generatedId: string }> = useLiveFixtures
+      const matchups: Array<{ competition: string; home: string; away: string; kickoff: string; kickoffDate: string; generatedId: string }> = useLiveFixtures
         ? liveMatchups.map((matchup) => ({
             ...matchup,
             generatedId: `market-api-${matchup.id}`,
@@ -576,12 +578,14 @@ function Workbench() {
         : generateUniqueClubMatchups(count).map((matchup, index) => ({
             ...matchup,
             kickoff: fallbackKickoffTimes[index],
+            kickoffDate: kickoffDateForToday(fallbackKickoffTimes[index], start) ?? new Date().toISOString(),
             generatedId: `market-gen-${nextFixtureIdRef.current++}`,
           }))
       const generated = matchups.map((matchup): Fixture => ({
         id: matchup.generatedId,
         competition: matchup.competition,
         kickoff: matchup.kickoff,
+        kickoffDate: matchup.kickoffDate,
         home: matchup.home,
         away: matchup.away,
         homePrior: calibration.lambda,
@@ -639,7 +643,7 @@ function Workbench() {
       const hit = marketHit(roundMarket, result)
       const marketOutcome = `${automatedMarketLabels[roundMarket]}: ${hit ? 'Hit' : 'Miss'}`
       const halves = roundMarket === 'secondHalfHighest' ? `, 1H ${result.firstHalfGoals}-${result.secondHalfGoals} 2H` : ''
-      return [`${index + 1}. ${fixture.home} vs ${fixture.away}: ${result.homeGoals}-${result.awayGoals} (${[outcome, totals(1), totals(2), bothScored, `${marketOutcome}${halves}`].join(', ')})`]
+      return [`${index + 1}. ${fixture.home} vs ${fixture.away} (${formatKickoff(fixture.kickoff, fixture.kickoffDate)}): ${result.homeGoals}-${result.awayGoals} (${[outcome, totals(1), totals(2), bothScored, `${marketOutcome}${halves}`].join(', ')})`]
     })
     try {
       await navigator.clipboard.writeText([`Round ${roundNumber}`, ...lines].join('\n'))
@@ -1286,12 +1290,15 @@ function Workbench() {
                       const selectedMarketHit = result ? marketHit(roundMarket, result) : null
                       return (
                         <article className="round-fixture" key={fixture.id}>
-                          <div className="round-fixture__head">
-                            <div className="round-fixture__title">
-                              <span className="round-fixture__index">{index + 1}.</span>
-                              <strong>{fixture.home} vs {fixture.away}</strong>
+                          <div className="round-fixture__heading">
+                            <div className="round-fixture__head">
+                              <div className="round-fixture__title">
+                                <span className="round-fixture__index">{index + 1}.</span>
+                                <strong>{fixture.home} vs {fixture.away}</strong>
+                              </div>
+                              <button className="icon-button" type="button" onClick={() => toggleRoundFixture(fixture.id)} aria-label={`Remove ${fixture.home} versus ${fixture.away} from round lineup`}><Trash2 size={13} /></button>
                             </div>
-                            <button className="icon-button" type="button" onClick={() => toggleRoundFixture(fixture.id)} aria-label={`Remove ${fixture.home} versus ${fixture.away} from round lineup`}><Trash2 size={13} /></button>
+                            <time className="round-fixture__kickoff" dateTime={fixture.kickoffDate}>{formatKickoff(fixture.kickoff, fixture.kickoffDate)}</time>
                           </div>
                           <div className="round-fixture__score" aria-label={result ? `Simulated final score ${result.homeGoals} to ${result.awayGoals}` : 'Score pending'}>
                             {result ? `${result.homeGoals} - ${result.awayGoals}` : '— - —'}

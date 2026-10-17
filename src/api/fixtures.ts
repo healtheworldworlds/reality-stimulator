@@ -21,6 +21,7 @@ type ApiFootballResponse = {
 export type LiveFixture = ClubMatchup & {
   id: number
   kickoff: string
+  kickoffDate: string
 }
 
 export type LiveFixtureResult =
@@ -52,6 +53,7 @@ function parseFixture(item: ApiFootballFixture): LiveFixture | null {
     home,
     away,
     kickoff: `${String(kickoffDate.getUTCHours()).padStart(2, '0')}:${String(kickoffDate.getUTCMinutes()).padStart(2, '0')}`,
+    kickoffDate: kickoffDate.toISOString(),
   }
 }
 

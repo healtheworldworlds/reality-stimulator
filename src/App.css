@@ -1060,6 +1060,20 @@ h2 {
   min-width: 0;
 }
 
+.round-fixture__heading {
+  min-width: 0;
+}
+
+.round-fixture__kickoff {
+  display: block;
+  padding-left: 18px;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
 .round-fixture__index {
   flex: 0 0 auto;
   color: var(--muted);
