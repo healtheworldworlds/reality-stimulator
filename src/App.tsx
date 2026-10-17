@@ -17,11 +17,13 @@ import {
 import { verifyPasscode } from './security/passcode'
 import {
   calculateProbabilities,
+  calibrateGoalMarket,
   expectedValue,
   sampleScoreline,
   MAX_GOAL_RATE,
   MAX_DIXON_COLES_RHO,
   MIN_DIXON_COLES_RHO,
+  type AutomatedMarket,
   type Market,
   type MarketProbabilities,
   type MarketSelection,
@@ -41,6 +43,13 @@ type Fixture = {
   awayRecent: number
   recentAgeDays: number
   odds: Record<Market, number>
+}
+
+type RoundResult = {
+  homeGoals: number
+  awayGoals: number
+  firstHalfGoals: number
+  secondHalfGoals: number
 }
 
 type AttachedScreenshot = {
@@ -106,6 +115,42 @@ const emptyCustomFixture: CustomFixtureDraft = {
   homeOdds: '',
   drawOdds: '',
   awayOdds: '',
+}
+
+const automatedMarketLabels: Record<AutomatedMarket, string> = {
+  over15: 'Over 1.5 Goals',
+  secondHalfHighest: 'Second Half Highest Scoring',
+  over25: 'Over 2.5 Goals',
+}
+
+const GENERATED_CLUBS = Array.from({ length: 60 }, (_, index) => `Generated Club ${String(index + 1).padStart(2, '0')}`)
+
+function allocateHalfGoals(homeGoals: number, awayGoals: number, secondHalfShare: number) {
+  let firstHalfGoals = 0
+  let secondHalfGoals = 0
+  for (let goal = 0; goal < homeGoals + awayGoals; goal += 1) {
+    if (Math.random() < secondHalfShare) secondHalfGoals += 1
+    else firstHalfGoals += 1
+  }
+  return { firstHalfGoals, secondHalfGoals }
+}
+
+function marketHit(market: AutomatedMarket, result: RoundResult) {
+  if (market === 'over15') return result.homeGoals + result.awayGoals >= 2
+  if (market === 'over25') return result.homeGoals + result.awayGoals >= 3
+  return result.secondHalfGoals > result.firstHalfGoals
+}
+
+function parseClockTime(value: string) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value)
+  if (!match) return null
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
+function kickoffInWindow(index: number, count: number, start: number, end: number) {
+  const duration = end >= start ? end - start : end + 1440 - start
+  const minute = (start + Math.floor(((index + 0.5) / count) * duration)) % 1440
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
 }
 
 const fixtures: Fixture[] = [
@@ -350,13 +395,24 @@ function Workbench() {
   const [halfLifeDays, setHalfLifeDays] = useState(30)
   const [rho, setRho] = useState(-0.05)
   const [fixturePool, setFixturePool] = useState(fixtures)
+  const [generatedFixtures, setGeneratedFixtures] = useState<Fixture[]>([])
   const [customDraft, setCustomDraft] = useState<CustomFixtureDraft>(emptyCustomFixture)
   const [customRatePreset, setCustomRatePreset] = useState('balanced')
   const [customFormOpen, setCustomFormOpen] = useState(true)
+  const [fixtureBoardOpen, setFixtureBoardOpen] = useState(false)
   const [activeGroup, setActiveGroup] = useState<keyof typeof marketGroups>('result')
+  const [generatorMarket, setGeneratorMarket] = useState<AutomatedMarket>('over15')
+  const [roundMarket, setRoundMarket] = useState<AutomatedMarket>('over15')
+  const [matchCount, setMatchCount] = useState('17')
+  const [minimumOdds, setMinimumOdds] = useState('1.20')
+  const [maximumOdds, setMaximumOdds] = useState('1.50')
+  const [kickoffStart, setKickoffStart] = useState('22:00')
+  const [kickoffEnd, setKickoffEnd] = useState('00:00')
+  const [roundSecondHalfShare, setRoundSecondHalfShare] = useState(0.56)
+  const [marketGeneratorSummary, setMarketGeneratorSummary] = useState('')
   const [roundFixtureIds, setRoundFixtureIds] = useState<string[]>([])
   const [roundNumber, setRoundNumber] = useState(0)
-  const [roundResults, setRoundResults] = useState<Map<string, { homeGoals: number; awayGoals: number }>>(() => new Map())
+  const [roundResults, setRoundResults] = useState<Map<string, RoundResult>>(() => new Map())
   const [betText, setBetText] = useState('')
   const [attachedFiles, setAttachedFiles] = useState<AttachedScreenshot[]>([])
   const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
@@ -372,7 +428,7 @@ function Workbench() {
 
   const preparedFixtures = useMemo(
     () =>
-      fixturePool.map((fixture) => {
+      [...fixturePool, ...generatedFixtures].map((fixture) => {
         const lambda = getRate(fixture.homePrior, fixture.homeRecent, fixture.recentAgeDays, halfLifeDays)
         const mu = getRate(fixture.awayPrior, fixture.awayRecent, fixture.recentAgeDays, halfLifeDays)
         return {
@@ -382,7 +438,7 @@ function Workbench() {
           probabilities: calculateProbabilities(lambda, mu, rho),
         }
       }),
-    [fixturePool, halfLifeDays, rho],
+    [fixturePool, generatedFixtures, halfLifeDays, rho],
   )
   const parsedBatch = useMemo(() => parseBatchMatchList(betText), [betText])
 
@@ -456,14 +512,77 @@ function Workbench() {
       setStatus('Add at least one match to the round lineup before generating results.')
       return
     }
-    const results = new Map<string, { homeGoals: number; awayGoals: number }>()
+    const results = new Map<string, RoundResult>()
     selected.forEach((fixture) => {
       const score = sampleScoreline(fixture.lambda, fixture.mu, rho)
-      results.set(fixture.id, { homeGoals: score.homeGoals, awayGoals: score.awayGoals })
+      const halves = allocateHalfGoals(score.homeGoals, score.awayGoals, roundSecondHalfShare)
+      results.set(fixture.id, { homeGoals: score.homeGoals, awayGoals: score.awayGoals, ...halves })
     })
     setRoundResults(results)
     setRoundNumber((current) => current + 1)
     setStatus(`Round ${roundNumber + 1} generated for ${selected.length} match${selected.length === 1 ? '' : 'es'}.`)
+  }
+
+  function generateMarketMatches(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const count = Number(matchCount)
+    const min = Number(minimumOdds)
+    const max = Number(maximumOdds)
+    const start = parseClockTime(kickoffStart)
+    const end = parseClockTime(kickoffEnd)
+    if (!Number.isInteger(count) || count < 3 || count > 30) {
+      setMarketGeneratorSummary('Choose a whole match count from 3 to 30.')
+      return
+    }
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 1 || max <= min || max > 1000) {
+      setMarketGeneratorSummary('Enter valid decimal odds with a maximum greater than the minimum.')
+      return
+    }
+    if (start === null || end === null) {
+      setMarketGeneratorSummary('Enter valid 24-hour kickoff start and end times.')
+      return
+    }
+
+    const calibration = calibrateGoalMarket(generatorMarket, min, max, rho)
+    if (!calibration) {
+      setMarketGeneratorSummary(`The model could not calibrate ${automatedMarketLabels[generatorMarket]} strictly inside ${min.toFixed(2)}–${max.toFixed(2)} with the supported goal-rate range. Try a wider odds bracket.`)
+      return
+    }
+    const probabilities = calculateProbabilities(calibration.lambda, calibration.mu, rho)
+    const generated = Array.from({ length: count }, (_, index): Fixture => ({
+      id: `market-gen-${nextFixtureIdRef.current++}`,
+      competition: 'Generated sample',
+      kickoff: kickoffInWindow(index, count, start, end),
+      home: GENERATED_CLUBS[index * 2],
+      away: GENERATED_CLUBS[index * 2 + 1],
+      homePrior: calibration.lambda,
+      awayPrior: calibration.mu,
+      homeRecent: calibration.lambda,
+      awayRecent: calibration.mu,
+      recentAgeDays: 0,
+      odds: {
+        ...DEFAULT_CUSTOM_ODDS,
+        home: 1 / probabilities.home,
+        draw: 1 / probabilities.draw,
+        away: 1 / probabilities.away,
+        over15: 1 / probabilities.over15,
+        under15: 1 / probabilities.under15,
+        over25: 1 / probabilities.over25,
+        under25: 1 / probabilities.under25,
+        bttsYes: 1 / probabilities.bttsYes,
+        bttsNo: 1 / probabilities.bttsNo,
+      },
+    }))
+    setGeneratedFixtures(generated)
+    setRoundFixtureIds(generated.map((fixture) => fixture.id))
+    setRoundResults(new Map())
+    setRoundNumber(0)
+    setRoundMarket(generatorMarket)
+    setRoundSecondHalfShare(calibration.secondHalfShare)
+    setMarketGeneratorSummary(
+      `${count} synthetic matches · ${automatedMarketLabels[generatorMarket]} model odds ${calibration.odds.toFixed(3)} · λ ${calibration.lambda.toFixed(2)} / μ ${calibration.mu.toFixed(2)}${generatorMarket === 'secondHalfHighest' ? ` · second-half allocation ${(calibration.secondHalfShare * 100).toFixed(1)}%` : ''}.`,
+    )
+    setStatus(`${count} generated matches added to the round lineup in kickoff order.`)
   }
 
   async function copyRoundOutcomes() {
@@ -481,7 +600,10 @@ function Workbench() {
         : result.homeGoals === result.awayGoals ? 'Draw' : 'Away Win'
       const totals = (line: number) => totalGoals > line ? `Over ${line}.5` : `Under ${line}.5`
       const bothScored = result.homeGoals > 0 && result.awayGoals > 0 ? 'GG' : 'NG'
-      return [`${index + 1}. ${fixture.home} vs ${fixture.away}: ${result.homeGoals}-${result.awayGoals} (${[outcome, totals(1), totals(2), bothScored].join(', ')})`]
+      const hit = marketHit(roundMarket, result)
+      const marketOutcome = `${automatedMarketLabels[roundMarket]}: ${hit ? 'Hit' : 'Miss'}`
+      const halves = roundMarket === 'secondHalfHighest' ? `, 1H ${result.firstHalfGoals}-${result.secondHalfGoals} 2H` : ''
+      return [`${index + 1}. ${fixture.home} vs ${fixture.away}: ${result.homeGoals}-${result.awayGoals} (${[outcome, totals(1), totals(2), bothScored, `${marketOutcome}${halves}`].join(', ')})`]
     })
     try {
       await navigator.clipboard.writeText([`Round ${roundNumber}`, ...lines].join('\n'))
@@ -930,16 +1052,22 @@ function Workbench() {
             )}
           </section>
 
-          <section className="fixture-section" id="fixtures" aria-labelledby="fixture-heading">
+          <section className={`fixture-section${fixtureBoardOpen ? ' is-open' : ''}`} id="fixtures" aria-labelledby="fixture-heading">
           <div className="section-heading section-heading--fixture">
             <div>
               <p className="eyebrow">03 / Upcoming markets</p>
               <h2 id="fixture-heading">Fixture board</h2>
             </div>
-            <button className="quiet-button" type="button" onClick={() => { setStatus('Fixture probabilities refreshed from the current calibration inputs.') }}>
-              <RefreshCw size={14} /> Recalculate
-            </button>
+            <div className="fixture-section__actions">
+              <button className="quiet-button fixture-board-toggle" type="button" aria-expanded={fixtureBoardOpen} aria-controls="fixture-board-content" onClick={() => setFixtureBoardOpen((open) => !open)}>
+                Toggle Fixture Board
+              </button>
+              <button className="quiet-button fixture-recalculate" type="button" onClick={() => { setStatus('Fixture probabilities refreshed from the current calibration inputs.') }}>
+                <RefreshCw size={14} /> Recalculate
+              </button>
+            </div>
           </div>
+          <div className="fixture-section__content" id="fixture-board-content">
           <div className="market-tabs" role="tablist" aria-label="Fixture market">
             {(Object.keys(marketGroups) as Array<keyof typeof marketGroups>).map((group) => (
               <button className={`market-tab${activeGroup === group ? ' is-active' : ''}`} key={group} type="button" role="tab" aria-selected={activeGroup === group} onClick={() => setActiveGroup(group)}>
@@ -980,13 +1108,14 @@ function Workbench() {
             ))}
           </div>
           <p className="data-note"><CircleHelp size={13} /> Add any listed match to the round lineup. Fixture odds are illustrative, not live prices or betting advice.</p>
+          </div>
           </section>
         </div>
 
         <aside className="side-column">
           <section className="intake-section" aria-labelledby="intake-heading">
             <div className="side-heading">
-              <div><p className="eyebrow">04 / Optional input</p><h2 id="intake-heading">Betslip intake</h2></div>
+              <div><p className="eyebrow">05 / Optional input</p><h2 id="intake-heading">Betslip intake</h2></div>
               <Clipboard size={17} />
             </div>
             <div
@@ -1036,9 +1165,60 @@ function Workbench() {
                         <p className="intake-note">Paste numbered fixtures, CSV / tab / pipe rows or a SportyBet betslip. Matches are added to the fixture board and round lineup.</p>
           </section>
 
+          <section className="market-generator" aria-labelledby="market-generator-heading">
+            <div className="side-heading">
+              <div><p className="eyebrow">04 / Automated market generator</p><h2 id="market-generator-heading">Build a priced round</h2></div>
+            </div>
+            <form className="market-generator__form" onSubmit={generateMarketMatches}>
+              <label className="form-field market-generator__market">
+                <span>Market selector</span>
+                <select value={generatorMarket} onChange={(event) => {
+                  const value = event.target.value
+                  if (value !== 'over15' && value !== 'secondHalfHighest' && value !== 'over25') return
+                  setGeneratorMarket(value)
+                  setMinimumOdds(value === 'secondHalfHighest' ? '1.80' : '1.20')
+                  setMaximumOdds(value === 'secondHalfHighest' ? '2.30' : '1.50')
+                }}>
+                  <option value="over15">Over 1.5 Goals</option>
+                  <option value="secondHalfHighest">Second Half Highest Scoring</option>
+                  <option value="over25">Over 2.5 Goals</option>
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Match count</span>
+                <input type="number" min="3" max="30" step="1" value={matchCount} onChange={(event) => setMatchCount(event.target.value)} required />
+              </label>
+              <div className="market-generator__odds">
+                <label className="form-field">
+                  <span>Min odds</span>
+                  <input type="number" inputMode="decimal" min="1.01" max="1000" step="0.01" value={minimumOdds} onChange={(event) => setMinimumOdds(event.target.value)} required />
+                </label>
+                <label className="form-field">
+                  <span>Max odds</span>
+                  <input type="number" inputMode="decimal" min="1.01" max="1000" step="0.01" value={maximumOdds} onChange={(event) => setMaximumOdds(event.target.value)} required />
+                </label>
+              </div>
+              <div className="market-generator__kickoff">
+                <label className="form-field">
+                  <span>Kickoff window · start</span>
+                  <input type="time" value={kickoffStart} onChange={(event) => setKickoffStart(event.target.value)} required />
+                </label>
+                <label className="form-field">
+                  <span>End</span>
+                  <input type="time" value={kickoffEnd} onChange={(event) => setKickoffEnd(event.target.value)} required />
+                </label>
+              </div>
+              <button className="run-button market-generator__submit" type="submit">
+                <Plus size={14} /> Generate Matches
+              </button>
+            </form>
+            <p className="market-generator__note">Generated club names and kickoff times are illustrative samples, not a live fixture feed. Overnight windows are supported.</p>
+            {marketGeneratorSummary && <p className={`market-generator__summary${marketGeneratorSummary.startsWith('The model could not') || marketGeneratorSummary.startsWith('Choose') || marketGeneratorSummary.startsWith('Enter') ? ' is-error' : ''}`} role="status" aria-live="polite">{marketGeneratorSummary}</p>}
+          </section>
+
           <section className="slip-section" aria-labelledby="slip-heading">
             <div className="side-heading side-heading--slip">
-                <div><p className="eyebrow">05 / Round generator</p><h2 id="slip-heading">Round outcomes <span className="count-badge">{roundFixtureIds.length}</span></h2></div>
+                <div><p className="eyebrow">06 / Round generator</p><h2 id="slip-heading">Round outcomes <span className="count-badge">{roundFixtureIds.length}</span></h2></div>
                 {roundFixtureIds.length > 0 && <button className="icon-button" type="button" onClick={() => { setRoundFixtureIds([]); setRoundResults(new Map()) }} aria-label="Clear round lineup"><Trash2 size={15} /></button>}
             </div>
               <section className="round-generator" aria-label="Round outcome generator">
@@ -1067,6 +1247,7 @@ function Workbench() {
                       const bothScored = result
                         ? result.homeGoals > 0 && result.awayGoals > 0 ? 'GG' : 'NG'
                         : 'Pending'
+                      const selectedMarketHit = result ? marketHit(roundMarket, result) : null
                       return (
                         <article className="round-fixture" key={fixture.id}>
                           <div className="round-fixture__head">
@@ -1079,6 +1260,12 @@ function Workbench() {
                           <div className="round-fixture__score" aria-label={result ? `Simulated final score ${result.homeGoals} to ${result.awayGoals}` : 'Score pending'}>
                             {result ? `${result.homeGoals} - ${result.awayGoals}` : '— - —'}
                           </div>
+                          {result && roundMarket === 'secondHalfHighest' && (
+                            <p className="round-fixture__halves">1st half {result.firstHalfGoals} – {result.secondHalfGoals} 2nd half</p>
+                          )}
+                          <span className={`round-fixture__market-badge${selectedMarketHit === null ? ' is-pending' : selectedMarketHit ? ' is-hit' : ' is-miss'}`}>
+                            {automatedMarketLabels[roundMarket]} · {selectedMarketHit === null ? 'Pending' : selectedMarketHit ? 'Hit' : 'Miss'}
+                          </span>
                           <div className="round-fixture__outcomes">
                             <p><span>1X2</span><strong>{resultLabel}</strong></p>
                             <p><span>Goals</span><strong>{overUnder(1)} · {overUnder(2)}</strong></p>
@@ -1106,8 +1293,8 @@ function Workbench() {
         <div><p className="eyebrow">07 / Method note</p><h2>From rates to<br /><em>realized outcomes.</em></h2></div>
         <div className="method-copy">
           <p>Independent Poisson goal rates form the score matrix. Dixon–Coles τ corrections adjust the four low-scoring outcomes, then the normalized matrix yields 1X2, totals and BTTS probabilities.</p>
-          <p>Each round draws one independent scoreline per selected fixture from its corrected Dixon–Coles matrix. The fixture lineup remains fixed between rounds so consecutive simulated outcomes can be generated and copied.</p>
-          <p>Half-life blends illustrative recent-form rates against team priors. All fixture inputs and prices in this prototype are examples, not a live data feed.</p>
+          <p>Each round draws one independent scoreline per selected fixture from its corrected Dixon–Coles matrix. The second-half market allocates each goal to a half at the calibrated share; a tie is not a second-half win. The fixture lineup remains fixed between rounds so outcomes can be regenerated and copied.</p>
+          <p>The automated generator calibrates model odds inside the requested range and creates synthetic club names and kickoff times. All fixture inputs and prices in this prototype are examples, not a live data feed.</p>
         </div>
       </section>
       <footer className="page-footer"><span>Reality Simulator</span><span>Research prototype · Model outputs are estimates</span></footer>

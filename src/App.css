@@ -455,6 +455,16 @@ h2 {
   min-height: 39px;
 }
 
+.fixture-section__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fixture-board-toggle {
+  display: none;
+}
+
 .quiet-button {
   gap: 7px;
   padding: 7px 9px;
@@ -651,8 +661,74 @@ h2 {
 }
 
 .intake-section,
-.slip-section {
+.slip-section,
+.market-generator {
   min-width: 0;
+}
+
+.market-generator {
+  order: -2;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.market-generator .side-heading {
+  margin-bottom: 12px;
+}
+
+.market-generator .side-heading h2 {
+  font-size: 20px;
+}
+
+.market-generator__form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.market-generator__market,
+.market-generator__odds,
+.market-generator__kickoff,
+.market-generator__submit {
+  grid-column: 1 / -1;
+}
+
+.market-generator__odds,
+.market-generator__kickoff {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.market-generator .form-field input,
+.market-generator .form-field select {
+  height: 36px;
+  font-size: 11px;
+}
+
+.market-generator__submit {
+  justify-content: center;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.market-generator__note,
+.market-generator__summary {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.market-generator__summary {
+  color: var(--text);
+  font-weight: 550;
+}
+
+.market-generator__summary.is-error {
+  color: var(--accent);
 }
 
 .slip-section {
@@ -1010,6 +1086,36 @@ h2 {
   font-variant-numeric: tabular-nums;
 }
 
+.round-fixture__halves {
+  margin: -5px 0 7px;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.round-fixture__market-badge {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 4px 7px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.round-fixture__market-badge.is-hit {
+  border-color: var(--accent);
+  background: #FAFAF8;
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.round-fixture__market-badge.is-miss {
+  color: var(--text);
+}
+
 .round-fixture__outcomes {
   display: grid;
   gap: 4px;
@@ -1230,6 +1336,35 @@ h2 {
     gap: 23px;
   }
 
+  .market-generator,
+  .slip-section {
+    grid-column: 1 / -1;
+  }
+
+  .market-generator {
+    order: -2;
+  }
+
+  .slip-section {
+    order: -1;
+  }
+
+  .fixture-board-toggle {
+    display: inline-flex;
+  }
+
+  .fixture-recalculate {
+    display: none;
+  }
+
+  .fixture-section:not(.is-open) .fixture-section__content {
+    display: none;
+  }
+
+  .fixture-section__actions {
+    flex: 0 0 auto;
+  }
+
   .method-section {
     grid-template-columns: 1fr;
     gap: 20px;
@@ -1271,8 +1406,13 @@ h2 {
   }
 
   .team-pair {
+    min-width: 0;
     gap: 5px;
     font-size: 16px;
+  }
+
+  .team-pair span:not(.versus) {
+    overflow-wrap: anywhere;
   }
 
   .expected-goals {

@@ -13,6 +13,16 @@ export type MarketSelection = Market
 
 export type MarketProbabilities = Record<Market, number>
 
+export type AutomatedMarket = 'over15' | 'secondHalfHighest' | 'over25'
+
+export type GoalMarketCalibration = {
+  lambda: number
+  mu: number
+  secondHalfShare: number
+  probability: number
+  odds: number
+}
+
 export type ScorelineCell = {
   homeGoals: number
   awayGoals: number
@@ -178,6 +188,93 @@ export function probabilitiesFromMatrix(matrix: ScorelineCell[]): MarketProbabil
 
 export function calculateProbabilities(lambda: number, mu: number, rho = -0.05, maxGoals = DEFAULT_MAX_GOALS) {
   return probabilitiesFromMatrix(buildScoreMatrix(lambda, mu, rho, maxGoals))
+}
+
+export function calculateSecondHalfHighestProbability(lambda: number, mu: number, secondHalfShare = 0.56, rho = -0.05) {
+  if (!Number.isFinite(secondHalfShare) || secondHalfShare <= 0 || secondHalfShare >= 1) {
+    throw new RangeError('secondHalfShare must be between 0 and 1.')
+  }
+  const matrix = buildScoreMatrix(lambda, mu, rho)
+  const halfProbabilityByTotal = new Map<number, number>()
+  let probability = 0
+  for (const cell of matrix) {
+    const totalGoals = cell.homeGoals + cell.awayGoals
+    let halfProbability = halfProbabilityByTotal.get(totalGoals)
+    if (halfProbability === undefined) {
+      let binomialProbability = (1 - secondHalfShare) ** totalGoals
+      halfProbability = 0
+      for (let secondHalfGoals = 0; secondHalfGoals <= totalGoals; secondHalfGoals += 1) {
+        if (secondHalfGoals > totalGoals / 2) halfProbability += binomialProbability
+        if (secondHalfGoals < totalGoals) {
+          binomialProbability *= ((totalGoals - secondHalfGoals) / (secondHalfGoals + 1)) * (secondHalfShare / (1 - secondHalfShare))
+        }
+      }
+      halfProbabilityByTotal.set(totalGoals, halfProbability)
+    }
+    probability += cell.probability * halfProbability
+  }
+  return probability
+}
+
+export function calibrateGoalMarket(
+  market: AutomatedMarket,
+  minOdds: number,
+  maxOdds: number,
+  rho = -0.05,
+): GoalMarketCalibration | null {
+  if (!Number.isFinite(minOdds) || !Number.isFinite(maxOdds) || minOdds <= 1 || maxOdds <= minOdds || maxOdds > 1000) {
+    throw new RangeError('The odds range must be finite, greater than 1, and have a maximum above its minimum.')
+  }
+  if (!Number.isFinite(rho) || rho < MIN_DIXON_COLES_RHO || rho > MAX_DIXON_COLES_RHO) {
+    throw new RangeError(`rho must be between ${MIN_DIXON_COLES_RHO} and ${MAX_DIXON_COLES_RHO}.`)
+  }
+
+  const targetOdds = (minOdds + maxOdds) / 2
+  const targetProbability = 1 / targetOdds
+  if (market !== 'secondHalfHighest') {
+    const selection = market
+    let low = 0
+    let high = 5
+    if (calculateProbabilities(high / 2, high / 2, rho)[selection] < targetProbability) return null
+    for (let iteration = 0; iteration < 48; iteration += 1) {
+      const totalRate = (low + high) / 2
+      if (calculateProbabilities(totalRate / 2, totalRate / 2, rho)[selection] < targetProbability) low = totalRate
+      else high = totalRate
+    }
+    const lambda = (low + high) / 4
+    const mu = lambda
+    const probability = calculateProbabilities(lambda, mu, rho)[selection]
+    const odds = 1 / probability
+    if (odds <= minOdds || odds >= maxOdds) return null
+    return { lambda, mu, secondHalfShare: 0.56, probability, odds }
+  }
+
+  let best: GoalMarketCalibration | null = null
+  let bestBaselineDistance = Number.POSITIVE_INFINITY
+  for (let totalRate = 0.25; totalRate <= 5; totalRate += 0.025) {
+    const lambda = totalRate / 2
+    const mu = totalRate / 2
+    let lowShare = 0.56
+    let highShare = 0.95
+    const lowProbability = calculateSecondHalfHighestProbability(lambda, mu, lowShare, rho)
+    const highProbability = calculateSecondHalfHighestProbability(lambda, mu, highShare, rho)
+    if (targetProbability < lowProbability || targetProbability > highProbability) continue
+    for (let iteration = 0; iteration < 40; iteration += 1) {
+      const share = (lowShare + highShare) / 2
+      if (calculateSecondHalfHighestProbability(lambda, mu, share, rho) < targetProbability) lowShare = share
+      else highShare = share
+    }
+    const secondHalfShare = (lowShare + highShare) / 2
+    const probability = calculateSecondHalfHighestProbability(lambda, mu, secondHalfShare, rho)
+    const odds = 1 / probability
+    if (odds <= minOdds || odds >= maxOdds) continue
+    const baselineDistance = Math.abs(secondHalfShare - 0.56)
+    if (baselineDistance < bestBaselineDistance) {
+      bestBaselineDistance = baselineDistance
+      best = { lambda, mu, secondHalfShare, probability, odds }
+    }
+  }
+  return best
 }
 
 export function expectedValue(probability: number, decimalOdds: number) {
