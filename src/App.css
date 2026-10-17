@@ -879,6 +879,28 @@ h2 {
   color: var(--muted);
 }
 
+.parse-badge {
+  display: inline-block;
+  margin: 8px 0 0;
+  padding: 4px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.parse-badge.is-empty {
+  border-color: var(--border-strong);
+  color: var(--muted);
+}
+
+.intake-section .run-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .intake-note {
   margin: 7px 0 0;
   color: var(--muted);

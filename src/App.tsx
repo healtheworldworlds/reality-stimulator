@@ -26,7 +26,7 @@ import {
   type MarketProbabilities,
   type MarketSelection,
 } from './engine/simulation'
-import { parseBetslipText, type ParsedBetslipFixture } from './engine/betslipParser'
+import { parseBatchMatchList, parseBetslipText, type ParsedBetslipFixture } from './engine/betslipParser'
 import './App.css'
 
 type Fixture = {
@@ -384,6 +384,51 @@ function Workbench() {
       }),
     [fixturePool, halfLifeDays, rho],
   )
+  const parsedBatch = useMemo(() => parseBatchMatchList(betText), [betText])
+
+  // Fits λ/μ so the Dixon–Coles 1X2 probabilities match the de-margined bookmaker odds.
+  function fitGoalRates(odds: number[]) {
+    const implied = odds.map((value) => 1 / value)
+    const total = implied.reduce((sum, value) => sum + value, 0)
+    const target = implied.map((value) => value / total)
+    const error = (lambda: number, mu: number) => {
+      const p = calculateProbabilities(lambda, mu, rho)
+      return (p.home - target[0]) ** 2 + (p.draw - target[1]) ** 2 + (p.away - target[2]) ** 2
+    }
+    let best = { lambda: OCR_DEFAULT_LAMBDA, mu: OCR_DEFAULT_MU, error: Number.POSITIVE_INFINITY }
+    const search = (lambdaFrom: number, lambdaTo: number, muFrom: number, muTo: number, step: number) => {
+      for (let lambda = lambdaFrom; lambda <= lambdaTo + 1e-9; lambda += step) {
+        for (let mu = muFrom; mu <= muTo + 1e-9; mu += step) {
+          const value = error(lambda, mu)
+          if (value < best.error) best = { lambda, mu, error: value }
+        }
+      }
+    }
+    search(0.3, 3, 0.3, 3, 0.1)
+    search(Math.max(0.1, best.lambda - 0.1), best.lambda + 0.1, Math.max(0.1, best.mu - 0.1), best.mu + 0.1, 0.02)
+    return { lambda: Number(best.lambda.toFixed(2)), mu: Number(best.mu.toFixed(2)) }
+  }
+
+  function loadPastedMatches() {
+    if (parsedBatch.length === 0) {
+      setStatus('No matches were recognized in the pasted text.')
+      return
+    }
+    const withRates = parsedBatch.map((parsed) => parsed.defaultedOdds === 0 && parsed.lambda === undefined && parsed.mu === undefined
+      ? { ...parsed, ...fitGoalRates(parsed.odds) }
+      : parsed)
+    const result = addParsedFixtures(withRates)
+    const existingIds = withRates.flatMap(({ home, away }) => {
+      const match = fixturePool.find((fixture) => fixture.home.toLocaleLowerCase() === home.toLocaleLowerCase() && fixture.away.toLocaleLowerCase() === away.toLocaleLowerCase())
+      return match ? [match.id] : []
+    })
+    if (existingIds.length > 0) setRoundFixtureIds((current) => [...current, ...existingIds.filter((id) => !current.includes(id))])
+    const total = result.added + existingIds.length
+    const notes = [`${total} match${total === 1 ? '' : 'es'} loaded into the board and round lineup`]
+    if (result.omitted > 0) notes.push(`${result.omitted} skipped because the fixture pool is full`)
+    setStatus(`${notes.join('; ')}. Click Generate Round Results to simulate.`)
+  }
+
   function toggleRoundFixture(fixtureId: string) {
     const fixture = preparedFixtures.find((item) => item.id === fixtureId)
     if (!fixture) return
@@ -974,8 +1019,18 @@ function Workbench() {
               </ul>
             )}
             <label className="paste-label" htmlFor="bet-text">Paste selections or notes</label>
-            <textarea id="bet-text" value={betText} maxLength={MAX_PASTED_TEXT_LENGTH} onChange={(event) => setBetText(sanitizeBetText(event.target.value))} onPaste={handlePaste} placeholder={'Arsenal — Over 2.5 — 1.76\nPaste your betslip text here'} rows={3} />
-            <p className="intake-note">Recognized matchups are added to the fixture board and round lineup.</p>
+            <textarea id="bet-text" value={betText} maxLength={MAX_PASTED_TEXT_LENGTH} onChange={(event) => setBetText(sanitizeBetText(event.target.value))} onPaste={handlePaste}             placeholder={'1. Arsenal vs Chelsea\nTime: 11:00 AM\n1: 2.30 | X: 3.60 | 2: 2.95\n\nReal Madrid | Barcelona | 2.10 | 3.40 | 3.20'} rows={6} />
+                        {betText.trim() && (
+                          <p className={`parse-badge${parsedBatch.length === 0 ? ' is-empty' : ''}`} role="status" aria-live="polite">
+                            {parsedBatch.length > 0
+                              ? `Parsed ${parsedBatch.length} match${parsedBatch.length === 1 ? '' : 'es'} successfully${parsedBatch.some((item) => item.defaultedOdds > 0) ? ' · missing odds set to 2.50' : ''}`
+                              : 'No matches recognized yet'}
+                          </p>
+                        )}
+                        <button className="run-button" type="button" onClick={loadPastedMatches} disabled={parsedBatch.length === 0}>
+                          <span>Load Pasted Matches into Board</span><Clipboard size={14} />
+                        </button>
+                        <p className="intake-note">Paste numbered fixtures, CSV / tab / pipe rows or a SportyBet betslip. Matches are added to the fixture board and round lineup.</p>
           </section>
 
           <section className="slip-section" aria-labelledby="slip-heading">

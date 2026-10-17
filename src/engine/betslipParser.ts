@@ -220,3 +220,185 @@ export function parseBetslipText(text: string): ParsedBetslipFixture[] {
 
   return parsed
 }
+
+export type BatchParsedFixture = ParsedBetslipFixture & {
+  index: number
+  defaultedOdds: number
+}
+
+export const DEFAULT_MISSING_ODD = 2.5
+const MAX_BATCH_FIXTURES = 50
+const BATCH_PLACEHOLDER = '(?:tbd|n\\/a|na|covered|locked|suspended|lock|\\*+|🔒|[-–—])'
+const BATCH_PLACEHOLDER_FIELD = new RegExp(`^${BATCH_PLACEHOLDER}$`, 'iu')
+const BATCH_LABELLED_ODD = new RegExp(`(?<![\\w.])(1|x|2|home|draw|away)\\s*[:=@]\\s*(\\d{1,3}(?:[.,]\\d{1,2})?|${BATCH_PLACEHOLDER})(?![\\w.])`, 'giu')
+const BATCH_TIME = /\b(?:[01]?\d|2[0-3]):[0-5]\d(?:\s*(?:AM|PM))?(?![\w:])/i
+const BATCH_DECIMAL = /(?<![\d.,])\d{1,3}[.,]\d{1,2}(?![\d])/g
+const BATCH_VERSUS = /^(.+?)\s+(?:vs?\.?|[-–—])\s+(.+)$/iu
+const BATCH_MARKET_WORDS = /\b(?:over|under|btts|gg|ng|both teams|double chance|correct score|handicap)\b/i
+const BATCH_LABEL_PREFIX = /^\s*(?:time|kick.?off|ko|date)\s*[:\-]?/i
+
+type OneXTwo = 'home' | 'draw' | 'away'
+
+type ScannedLine = {
+  index?: number
+  texts: string[]
+  labelled: Partial<Record<OneXTwo, number>>
+  bare: number[]
+  time?: string
+  hasMarketWord: boolean
+}
+
+function toOdd(raw: string) {
+  const value = Number(raw.replace(',', '.'))
+  return Number.isFinite(value) && value >= 1.01 && value <= 1000 ? value : Number.NaN
+}
+
+function labelToMarket(label: string): OneXTwo {
+  const key = label.toLowerCase()
+  return key === '1' || key === 'home' ? 'home' : key === '2' || key === 'away' ? 'away' : 'draw'
+}
+
+function cleanBatchTeam(value: string) {
+  return value
+    .replace(/^[\s|,;:@–—-]+|[\s|,;:@–—-]+$/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 60)
+}
+
+function scanLine(rawLine: string): ScannedLine {
+  let line = rawLine.trim()
+  let index: number | undefined
+  const numbered = /^(\d{1,3})\s*[.)]\s+(?=\S)/.exec(line)
+  if (numbered) {
+    index = Number(numbered[1])
+    line = line.slice(numbered[0].length)
+  }
+  const delimited = /\t|\||,\s/.test(line)
+  const fields = (delimited ? line.split(/\t|\||,\s+/) : [line]).map((field) => field.trim()).filter(Boolean)
+  if (index === undefined && delimited && fields.length > 1 && /^\d{1,3}$/.test(fields[0])) {
+    index = Number(fields.shift())
+  }
+
+  const scanned: ScannedLine = { index, texts: [], labelled: {}, bare: [], hasMarketWord: BATCH_MARKET_WORDS.test(line) }
+  for (const field of fields) {
+    let work = field
+    work = work.replace(BATCH_LABELLED_ODD, (_all, label: string, value: string) => {
+      const market = labelToMarket(label)
+      if (scanned.labelled[market] === undefined) scanned.labelled[market] = BATCH_PLACEHOLDER_FIELD.test(value) ? Number.NaN : toOdd(value)
+      return ' '
+    })
+    const time = BATCH_TIME.exec(work)
+    if (time) {
+      scanned.time ??= time[0].replace(/\s+/g, ' ').trim().toUpperCase()
+      work = work.replace(BATCH_TIME, ' ')
+    }
+    work = work.trim()
+    if (BATCH_PLACEHOLDER_FIELD.test(work)) {
+      if (!/^[-–—]$/.test(work) || delimited) scanned.bare.push(Number.NaN)
+      continue
+    }
+    if (!scanned.hasMarketWord) {
+      for (const match of work.matchAll(BATCH_DECIMAL)) scanned.bare.push(toOdd(match[0]))
+    }
+    work = work.replace(BATCH_DECIMAL, ' ')
+      .replace(BATCH_LABEL_PREFIX, ' ')
+      .replace(new RegExp(`\\s+${BATCH_PLACEHOLDER}\\s*$`, 'iu'), ' ')
+    work = cleanBatchTeam(work)
+    if (/\p{L}/u.test(work)) scanned.texts.push(work)
+  }
+  return scanned
+}
+
+function findBatchTeams(scanned: ScannedLine) {
+  let home: string | undefined
+  let away: string | undefined
+  if (scanned.texts.length === 1) {
+    const match = BATCH_VERSUS.exec(scanned.texts[0])
+    if (match) [home, away] = [cleanBatchTeam(match[1]), cleanBatchTeam(match[2])]
+  } else if (scanned.texts.length >= 2) {
+    const hasOddsOrIndex = scanned.index !== undefined || scanned.bare.length > 0 || Object.keys(scanned.labelled).length > 0
+    if (hasOddsOrIndex) [home, away] = [cleanBatchTeam(scanned.texts[0]), cleanBatchTeam(scanned.texts[1])]
+  }
+  if (!home || !away || !isTeamCandidate(home) || !isTeamCandidate(away)) return undefined
+  if (home.toLocaleLowerCase() === away.toLocaleLowerCase()) return undefined
+  return { home, away }
+}
+
+/**
+ * Parses pasted multi-line match lists: numbered fixtures with detail lines,
+ * CSV/tab/pipe rows, and plain betslip summaries. Missing 1X2 odds fall back to 2.50.
+ */
+export function parseBatchMatchList(text: string): BatchParsedFixture[] {
+  type Block = { index?: number; home: string; away: string; time?: string; labelled: ScannedLine['labelled']; bare: number[] }
+  const blocks: Block[] = []
+  let current: Block | undefined
+
+  for (const rawLine of text.slice(0, MAX_OCR_TEXT_LENGTH).split(/\r?\n/)) {
+    if (!rawLine.trim()) continue
+    const scanned = scanLine(rawLine)
+    const teams = findBatchTeams(scanned)
+    if (teams) {
+      if (blocks.length >= MAX_BATCH_FIXTURES) break
+      current = { index: scanned.index, ...teams, time: scanned.time, labelled: { ...scanned.labelled }, bare: [...scanned.bare] }
+      blocks.push(current)
+    } else if (current) {
+      current.time ??= scanned.time
+      for (const [market, value] of Object.entries(scanned.labelled) as [OneXTwo, number][]) {
+        if (current.labelled[market] === undefined) current.labelled[market] = value
+      }
+      current.bare.push(...scanned.bare)
+    }
+  }
+
+  const results: BatchParsedFixture[] = []
+  const seen = new Set<string>()
+  for (const block of blocks) {
+    const key = `${block.home.toLocaleLowerCase()}\u0000${block.away.toLocaleLowerCase()}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    const hasLabels = Object.keys(block.labelled).length > 0
+    let defaultedOdds = 0
+    const marketOdds: Partial<Record<Market, number>> = {}
+    RESULT_MARKETS.forEach((market, position) => {
+      const value = hasLabels ? block.labelled[market as OneXTwo] : block.bare[position]
+      if (value !== undefined && Number.isFinite(value)) {
+        marketOdds[market] = value
+      } else {
+        marketOdds[market] = DEFAULT_MISSING_ODD
+        defaultedOdds += 1
+      }
+    })
+    results.push({
+      index: block.index ?? results.length + 1,
+      home: block.home,
+      away: block.away,
+      kickoff: block.time ?? 'TBD',
+      odds: RESULT_MARKETS.map((market) => marketOdds[market] as number),
+      marketOdds,
+      defaultedOdds,
+    })
+  }
+
+  if (results.length > 0) return results
+  return parseBetslipText(text).map((fixture, position) => {
+    const marketOdds = { ...fixture.marketOdds }
+    let defaultedOdds = 0
+    for (const [offset, market] of RESULT_MARKETS.entries()) {
+      const value = marketOdds[market] ?? fixture.odds[offset]
+      if (value !== undefined) marketOdds[market] = value
+      else {
+        marketOdds[market] = DEFAULT_MISSING_ODD
+        defaultedOdds += 1
+      }
+    }
+    return {
+      ...fixture,
+      index: position + 1,
+      kickoff: fixture.kickoff === 'Kickoff TBD' ? 'TBD' : fixture.kickoff,
+      odds: RESULT_MARKETS.map((market) => marketOdds[market] as number),
+      marketOdds,
+      defaultedOdds,
+    }
+  })
+}
