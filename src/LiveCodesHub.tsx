@@ -9,6 +9,7 @@ type LiveCode = {
   odds: number | null
   time: string
   bookie: Bookie
+  channel: string
 }
 
 type FeedPayload = {
@@ -17,6 +18,7 @@ type FeedPayload = {
   updatedAt?: string
   sportybet?: LiveCode[]
   betway?: LiveCode[]
+  warnings?: string[]
 }
 
 const BOOKIES: Record<Bookie, { label: string, loadLabel: string, url: string }> = {
@@ -59,7 +61,8 @@ export function LiveCodesHub() {
   }, [])
 
   useEffect(() => {
-    void refresh()
+    const timer = setTimeout(() => void refresh(), 0)
+    return () => clearTimeout(timer)
   }, [refresh])
 
   useEffect(() => {
@@ -113,6 +116,7 @@ export function LiveCodesHub() {
         Auto-refresh every 60 seconds
       </label>
       {error && <p className="live-codes__error" role="alert">{error}</p>}
+      {feed?.warnings?.map((warning) => <p className="live-codes__warning" key={warning}>Some channels could not refresh: {warning}</p>)}
       {!error && !loading && items.length === 0 && <p className="live-codes__empty">No {meta.label} codes found right now.</p>}
       <ul className="live-codes__list">
         {items.map((item) => (
@@ -122,6 +126,7 @@ export function LiveCodesHub() {
               <div className="live-code__tags">
                 {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}
                 <span className="live-code__time">{relativeTime(item.time, now)}</span>
+                <span className="live-code__channel">@{item.channel}</span>
               </div>
             </div>
             <div className="live-code__actions">

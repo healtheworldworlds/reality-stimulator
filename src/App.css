@@ -859,6 +859,11 @@ h2 {
   color: var(--muted);
 }
 
+.live-code__channel {
+  color: var(--muted);
+  font-size: 9px;
+}
+
 .live-code__actions {
   display: flex;
   flex-wrap: wrap;
@@ -876,6 +881,12 @@ h2 {
   margin: 0 0 10px;
   color: #b42318;
   font-size: 11px;
+}
+
+.live-codes__warning {
+  margin: 7px 0;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .live-codes__empty,
