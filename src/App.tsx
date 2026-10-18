@@ -121,7 +121,7 @@ const emptyCustomFixture: CustomFixtureDraft = {
   awayOdds: '',
 }
 
-const SPORTYBET_GH_URL = 'https://www.sportybet.com/gh/'
+const SPORTYBET_GH_URL = 'https://www.sportybet.com/gh/m/sport/football'
 
 const automatedMarketLabels: Record<AutomatedMarket, string> = {
   over15: 'Over 1.5 Goals',
@@ -634,19 +634,33 @@ function Workbench() {
       setStatus('Add matches to the round before copying selections.')
       return
     }
-    const lines = roundFixtureIds.flatMap((id, index) => {
+    const picked = roundFixtureIds.flatMap((id) => {
       const fixture = preparedFixtures.find((item) => item.id === id)
       if (!fixture) return []
-      const pick = roundMarket === 'secondHalfHighest' ? 'Second Half Highest Scoring' : automatedMarketLabels[roundMarket]
       const odds = roundMarket === 'over15' ? fixture.odds.over15 : roundMarket === 'over25' ? fixture.odds.over25 : null
-      return [`${index + 1}. ${fixture.home} vs ${fixture.away}\n   Market & Pick: ${pick}\n   Odds: ${odds === null ? 'N/A' : odds.toFixed(2)} · Kickoff: ${formatKickoff(fixture.kickoff, fixture.kickoffDate)}`]
+      return [{ fixture, odds }]
     })
+    const pick = automatedMarketLabels[roundMarket]
+    const allOdds = picked.every((item) => item.odds !== null)
+    const combined = allOdds ? picked.reduce((total, item) => total * (item.odds ?? 1), 1) : null
+    const lines = picked.map(({ fixture, odds }, index) =>
+      `${index + 1}. ${fixture.home} vs ${fixture.away} | Kickoff: ${formatKickoff(fixture.kickoff, fixture.kickoffDate)}\n   • Pick: ${pick} (Odds: ${odds === null ? 'N/A' : odds.toFixed(2)})`)
+    const text = [
+      '🏆 REALITY STIMULATOR BETSLIP',
+      'Target: SportyBet GH',
+      `Matches: ${picked.length}`,
+      `Total Estimated Odds: ${combined === null ? 'see list below' : combined.toFixed(2)}`,
+      '',
+      ...lines,
+      '',
+      `🔗 Bet on SportyBet GH: ${SPORTYBET_GH_URL}`,
+    ].join('\n')
     try {
-      await navigator.clipboard.writeText([...lines, '', `Book on SportyBet Ghana: ${SPORTYBET_GH_URL}`].join('\n'))
+      await navigator.clipboard.writeText(text)
       setStatus('Selections copied to clipboard.')
       setCopyToast(true)
       if (copyToastTimer.current) clearTimeout(copyToastTimer.current)
-      copyToastTimer.current = setTimeout(() => setCopyToast(false), 2000)
+      copyToastTimer.current = setTimeout(() => setCopyToast(false), 2500)
     } catch (error) {
       setStatus(`Could not copy selections: ${error instanceof Error ? error.message : 'clipboard unavailable'}`)
     }

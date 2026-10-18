@@ -1186,6 +1186,11 @@ h2 {
   text-decoration: none;
 }
 
+.round-generator__secondary a.quiet-button {
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
 .copy-toast {
   margin: 10px 0 0;
   padding: 8px 12px;
