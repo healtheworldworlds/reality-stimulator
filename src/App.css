@@ -759,6 +759,133 @@ h2 {
   margin-bottom: 11px;
 }
 
+.live-codes {
+  min-width: 0;
+  margin-top: 30px;
+}
+
+.live-codes__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.live-codes__tabs {
+  display: flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.live-codes__tab {
+  padding: 7px 11px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.live-codes__tab.is-active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.live-codes__auto {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.is-spinning {
+  animation: live-codes-spin 0.8s linear infinite;
+}
+
+@keyframes live-codes-spin {
+  to { transform: rotate(360deg); }
+}
+
+.live-codes__list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.live-code {
+  display: grid;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.live-code__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.live-code__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 20px;
+  letter-spacing: 0.06em;
+}
+
+.live-code__tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.live-code__odds {
+  padding: 2px 7px;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--accent);
+}
+
+.live-code__time {
+  color: var(--muted);
+}
+
+.live-code__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.live-code__load {
+  color: var(--accent);
+  font-size: 10px;
+}
+
+.live-codes__error {
+  margin: 0 0 10px;
+  color: #b42318;
+  font-size: 11px;
+}
+
+.live-codes__empty,
+.live-codes__note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .side-heading--slip h2 {
   display: flex;
   align-items: center;

@@ -26,6 +26,7 @@ import {
 import { generateKickoffTimes, generateUniqueClubMatchups } from './engine/clubs'
 import { formatKickoff, kickoffDateForToday } from './engine/kickoff'
 import { fetchTodaysFixtures, type LiveFixture } from './api/fixtures'
+import { LiveCodesHub } from './LiveCodesHub'
 import './App.css'
 
 type Fixture = {
@@ -887,6 +888,7 @@ function Workbench() {
                 </div>
               </section>
           </section>
+          <LiveCodesHub />
         </aside>
       </div>
 
