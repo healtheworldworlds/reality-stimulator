@@ -12,7 +12,7 @@ type BookResponse = {
 }
 
 const HOST = 'convert-bet-codes-api1.p.rapidapi.com'
-const ENDPOINT = process.env.CONVERT_BET_CODES_URL ?? `https://${HOST}/convert`
+const ENDPOINT = process.env.CONVERT_BET_CODES_URL ?? `https://${HOST}/generate_bet_code`
 const MAX_MATCHES = 40
 
 function isText(value: unknown, max = 120): value is string {
@@ -61,7 +61,7 @@ export default async function bookSportyBetHandler(request: BookRequest, respons
         'x-rapidapi-host': HOST,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ bookmaker: 'sportybet:gh', target: 'sportybet:gh', matches }),
+      body: JSON.stringify({ bookmaker: 'sportybet', destination: 'sportybet:gh', selections: matches, matches }),
       signal: AbortSignal.timeout(20_000),
     })
     const text = await upstream.text()
