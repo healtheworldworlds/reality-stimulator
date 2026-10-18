@@ -1,18 +1,13 @@
 // Palette: #FAFAF8, #FFFFFF, #1A1A1A, #666660, #E5E5E0, #C85A32; type: Georgia + Inter/system sans.
 // Icons: Lucide outline set, monochrome, 1.5px stroke.
-import { useMemo, useRef, useState, type ClipboardEvent, type FormEvent } from 'react'
-import { createWorker } from 'tesseract.js'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Activity,
   ArrowDownToLine,
   CircleHelp,
-  Clipboard,
-  FileImage,
-  Copy,
   Plus,
   RefreshCw,
   Trash2,
-  Upload,
 } from 'lucide-react'
 import { verifyPasscode } from './security/passcode'
 import {
@@ -31,7 +26,6 @@ import {
 import { generateKickoffTimes, generateUniqueClubMatchups } from './engine/clubs'
 import { formatKickoff, kickoffDateForToday } from './engine/kickoff'
 import { fetchTodaysFixtures, type LiveFixture } from './api/fixtures'
-import { parseBatchMatchList, parseBetslipText, type ParsedBetslipFixture } from './engine/betslipParser'
 import './App.css'
 
 type Fixture = {
@@ -56,25 +50,6 @@ type RoundResult = {
   secondHalfGoals: number
 }
 
-type AttachedScreenshot = {
-  id: number
-  name: string
-  size: number
-  ocrStatus: string
-}
-
-type VerifiedScreenshot = {
-  file: File
-  attachment: AttachedScreenshot
-}
-
-type OcrProgress = {
-  attachmentId: number
-  fileName: string
-  percent: number
-  stage: string
-}
-
 type CustomFixtureDraft = {
   home: string
   away: string
@@ -88,14 +63,9 @@ type CustomFixtureDraft = {
 
 const MIN_HALF_LIFE_DAYS = 7
 const MAX_HALF_LIFE_DAYS = 90
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-const MAX_SCREENSHOTS = 5
-const MAX_PASTED_TEXT_LENGTH = 5000
-const MAX_OCR_TEXT_LENGTH = 20_000
 const MAX_CUSTOM_TEAM_NAME_LENGTH = 80
 const MAX_CUSTOM_KICKOFF_LENGTH = 64
 const MAX_FIXTURE_POOL_SIZE = 100
-const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 const DEFAULT_CUSTOM_ODDS: Record<Market, number> = {
   home: 1.01,
   draw: 1.01,
@@ -107,8 +77,6 @@ const DEFAULT_CUSTOM_ODDS: Record<Market, number> = {
   bttsYes: 1.85,
   bttsNo: 1.9,
 }
-const OCR_DEFAULT_LAMBDA = 1.65
-const OCR_DEFAULT_MU = 1.15
 
 const emptyCustomFixture: CustomFixtureDraft = {
   home: '',
@@ -120,8 +88,6 @@ const emptyCustomFixture: CustomFixtureDraft = {
   drawOdds: '',
   awayOdds: '',
 }
-
-const SPORTYBET_GH_URL = 'https://www.sportybet.com/gh/m/sport/football'
 
 const automatedMarketLabels: Record<AutomatedMarket, string> = {
   over15: 'Over 1.5 Goals',
@@ -267,19 +233,6 @@ function getRate(prior: number, recent: number, ageDays: number, halfLifeDays: n
   return prior * (1 - recentWeight) + recent * recentWeight
 }
 
-function sanitizeBetText(value: string) {
-  return Array.from(value.slice(0, MAX_PASTED_TEXT_LENGTH * 2))
-    .filter((character) => {
-      const codePoint = character.codePointAt(0)
-      return codePoint !== undefined &&
-        !((codePoint <= 0x08) || (codePoint >= 0x0b && codePoint <= 0x1f) ||
-          (codePoint >= 0x7f && codePoint <= 0x9f) || (codePoint >= 0x202a && codePoint <= 0x202e) ||
-          (codePoint >= 0x2066 && codePoint <= 0x2069))
-    })
-    .join('')
-    .slice(0, MAX_PASTED_TEXT_LENGTH)
-}
-
 function sanitizePlainText(value: string, maxLength: number) {
   return Array.from(value)
     .filter((character) => {
@@ -292,34 +245,6 @@ function sanitizePlainText(value: string, maxLength: number) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, maxLength)
-}
-
-function sanitizeFileName(value: string) {
-  const basename = value.slice(0, 512).split(/[\\/]/).pop() ?? ''
-  const safeName = basename
-    .normalize('NFKD')
-    .replace(/[^A-Za-z0-9._() -]/g, '_')
-    .replace(/\.{2,}/g, '.')
-    .trim()
-    .slice(0, 100)
-  return safeName || 'screenshot'
-}
-
-async function hasSupportedImageSignature(file: File) {
-  const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer())
-  if (file.type === 'image/png') {
-    return bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
-      bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a
-  }
-  if (file.type === 'image/jpeg') {
-    return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
-  }
-  if (file.type === 'image/webp') {
-    return bytes.length >= 12 &&
-      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
-      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
-  }
-  return false
 }
 
 function selectionProbability(probabilities: MarketProbabilities, market: Market) {
@@ -417,8 +342,6 @@ function Workbench() {
   const [activeGroup, setActiveGroup] = useState<keyof typeof marketGroups>('result')
   const [generatorMarket, setGeneratorMarket] = useState<AutomatedMarket>('over15')
   const [roundMarket, setRoundMarket] = useState<AutomatedMarket>('over15')
-  const [copyToast, setCopyToast] = useState(false)
-  const copyToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [matchCount, setMatchCount] = useState('17')
   const [minimumOdds, setMinimumOdds] = useState('1.20')
   const [maximumOdds, setMaximumOdds] = useState('1.50')
@@ -430,17 +353,7 @@ function Workbench() {
   const [roundFixtureIds, setRoundFixtureIds] = useState<string[]>([])
   const [roundNumber, setRoundNumber] = useState(0)
   const [roundResults, setRoundResults] = useState<Map<string, RoundResult>>(() => new Map())
-  const [betText, setBetText] = useState('')
-  const [attachedFiles, setAttachedFiles] = useState<AttachedScreenshot[]>([])
-  const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
-  const [ocrError, setOcrError] = useState('')
-  const [rawScannedText, setRawScannedText] = useState('')
-  const [isDragging, setIsDragging] = useState(false)
   const [status, setStatus] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const attachmentIdRef = useRef(0)
-  const attachedFilesRef = useRef<AttachedScreenshot[]>([])
-  const isOcrRunningRef = useRef(false)
   const nextFixtureIdRef = useRef(1)
 
   const preparedFixtures = useMemo(
@@ -457,52 +370,6 @@ function Workbench() {
       }),
     [fixturePool, generatedFixtures, halfLifeDays, rho],
   )
-  const parsedBatch = useMemo(() => parseBatchMatchList(betText), [betText])
-
-  // Fits λ/μ so the Dixon–Coles 1X2 probabilities match the de-margined bookmaker odds.
-  function fitGoalRates(odds: number[]) {
-    const implied = odds.map((value) => 1 / value)
-    const total = implied.reduce((sum, value) => sum + value, 0)
-    const target = implied.map((value) => value / total)
-    const error = (lambda: number, mu: number) => {
-      const p = calculateProbabilities(lambda, mu, rho)
-      return (p.home - target[0]) ** 2 + (p.draw - target[1]) ** 2 + (p.away - target[2]) ** 2
-    }
-    let best = { lambda: OCR_DEFAULT_LAMBDA, mu: OCR_DEFAULT_MU, error: Number.POSITIVE_INFINITY }
-    const search = (lambdaFrom: number, lambdaTo: number, muFrom: number, muTo: number, step: number) => {
-      for (let lambda = lambdaFrom; lambda <= lambdaTo + 1e-9; lambda += step) {
-        for (let mu = muFrom; mu <= muTo + 1e-9; mu += step) {
-          const value = error(lambda, mu)
-          if (value < best.error) best = { lambda, mu, error: value }
-        }
-      }
-    }
-    search(0.3, 3, 0.3, 3, 0.1)
-    search(Math.max(0.1, best.lambda - 0.1), best.lambda + 0.1, Math.max(0.1, best.mu - 0.1), best.mu + 0.1, 0.02)
-    return { lambda: Number(best.lambda.toFixed(2)), mu: Number(best.mu.toFixed(2)) }
-  }
-
-  function loadPastedMatches() {
-    if (parsedBatch.length === 0) {
-      setStatus('No matches were recognized in the pasted text.')
-      return
-    }
-    const withRates = parsedBatch.map((parsed) => parsed.defaultedOdds === 0 && parsed.lambda === undefined && parsed.mu === undefined
-      ? { ...parsed, ...fitGoalRates(parsed.odds) }
-      : parsed)
-    const result = addParsedFixtures(withRates)
-    const loadedFixtures = [...fixturePool, ...result.fixtures]
-    const orderedIds = withRates.flatMap(({ home, away }) => {
-      const match = loadedFixtures.find((fixture) => fixture.home.toLocaleLowerCase() === home.toLocaleLowerCase() && fixture.away.toLocaleLowerCase() === away.toLocaleLowerCase())
-      return match ? [match.id] : []
-    })
-    const orderedUniqueIds = [...new Set(orderedIds)]
-    setRoundFixtureIds((current) => [...current.filter((id) => !orderedUniqueIds.includes(id)), ...orderedUniqueIds])
-    const total = orderedUniqueIds.length
-    const notes = [`${total} match${total === 1 ? '' : 'es'} loaded into the board and round lineup`]
-    if (result.omitted > 0) notes.push(`${result.omitted} skipped because the fixture pool is full`)
-    setStatus(`${notes.join('; ')}. Click Generate Round Results to simulate.`)
-  }
 
   function toggleRoundFixture(fixtureId: string) {
     const fixture = preparedFixtures.find((item) => item.id === fixtureId)
@@ -627,273 +494,6 @@ function Workbench() {
     } finally {
       setIsGeneratingMatches(false)
     }
-  }
-
-  async function copyRoundOutcomes() {
-    if (roundFixtureIds.length === 0) {
-      setStatus('Add matches to the round before copying selections.')
-      return
-    }
-    const picked = roundFixtureIds.flatMap((id) => {
-      const fixture = preparedFixtures.find((item) => item.id === id)
-      if (!fixture) return []
-      const odds = roundMarket === 'over15' ? fixture.odds.over15 : roundMarket === 'over25' ? fixture.odds.over25 : null
-      return [{ fixture, odds }]
-    })
-    const pick = automatedMarketLabels[roundMarket]
-    const allOdds = picked.every((item) => item.odds !== null)
-    const combined = allOdds ? picked.reduce((total, item) => total * (item.odds ?? 1), 1) : null
-    const lines = picked.map(({ fixture, odds }, index) =>
-      `${index + 1}. ${fixture.home} vs ${fixture.away} | Kickoff: ${formatKickoff(fixture.kickoff, fixture.kickoffDate)}\n   • Pick: ${pick} (Odds: ${odds === null ? 'N/A' : odds.toFixed(2)})`)
-    const text = [
-      '🏆 REALITY STIMULATOR BETSLIP',
-      'Target: SportyBet GH',
-      `Matches: ${picked.length}`,
-      `Total Estimated Odds: ${combined === null ? 'see list below' : combined.toFixed(2)}`,
-      '',
-      ...lines,
-      '',
-      `🔗 Bet on SportyBet GH: ${SPORTYBET_GH_URL}`,
-    ].join('\n')
-    try {
-      await navigator.clipboard.writeText(text)
-      setStatus('Selections copied to clipboard.')
-      setCopyToast(true)
-      if (copyToastTimer.current) clearTimeout(copyToastTimer.current)
-      copyToastTimer.current = setTimeout(() => setCopyToast(false), 2500)
-    } catch (error) {
-      setStatus(`Could not copy selections: ${error instanceof Error ? error.message : 'clipboard unavailable'}`)
-    }
-  }
-
-  function addParsedFixtures(parsedFixtures: ParsedBetslipFixture[]) {
-    const existing = new Set(fixturePool.map((fixture) => `${fixture.home.toLocaleLowerCase()}\u0000${fixture.away.toLocaleLowerCase()}`))
-    const unique = parsedFixtures.filter(({ home, away }) => {
-      const key = `${home.toLocaleLowerCase()}\u0000${away.toLocaleLowerCase()}`
-      if (existing.has(key)) return false
-      existing.add(key)
-      return true
-    })
-    const capacity = Math.max(0, MAX_FIXTURE_POOL_SIZE - fixturePool.length)
-    let defaultRateFixtures = 0
-    const fixturesToAdd = unique.slice(0, capacity).map((parsed) => {
-      const lambda = parsed.lambda ?? OCR_DEFAULT_LAMBDA
-      const mu = parsed.mu ?? OCR_DEFAULT_MU
-      if (parsed.lambda === undefined || parsed.mu === undefined) defaultRateFixtures += 1
-      const probabilities = calculateProbabilities(lambda, mu, rho)
-      const fallbackOdds: Record<Market, number> = {
-        ...DEFAULT_CUSTOM_ODDS,
-        home: Math.min(1000, 1 / probabilities.home),
-        draw: Math.min(1000, 1 / probabilities.draw),
-        away: Math.min(1000, 1 / probabilities.away),
-      }
-      for (const [index, market] of (['home', 'draw', 'away'] as const).entries()) {
-        const parsedOdds = parsed.marketOdds[market] ?? parsed.odds[index]
-        if (parsedOdds !== undefined) fallbackOdds[market] = parsedOdds
-      }
-      for (const market of ['over15', 'under15', 'over25', 'under25', 'bttsYes', 'bttsNo'] as const) {
-        const parsedOdds = parsed.marketOdds[market]
-        if (parsedOdds !== undefined) fallbackOdds[market] = parsedOdds
-      }
-      const id = `ocr-${nextFixtureIdRef.current}`
-      nextFixtureIdRef.current += 1
-      return {
-        id,
-        competition: 'Scanned betslip',
-        kickoff: sanitizePlainText(parsed.kickoff, MAX_CUSTOM_KICKOFF_LENGTH) || 'Kickoff TBD',
-        home: sanitizePlainText(parsed.home, MAX_CUSTOM_TEAM_NAME_LENGTH),
-        away: sanitizePlainText(parsed.away, MAX_CUSTOM_TEAM_NAME_LENGTH),
-        homePrior: lambda,
-        awayPrior: mu,
-        homeRecent: lambda,
-        awayRecent: mu,
-        recentAgeDays: 0,
-        odds: fallbackOdds,
-      } satisfies Fixture
-    }).filter((fixture) => fixture.home && fixture.away && fixture.home !== fixture.away)
-
-    if (fixturesToAdd.length === 0) {
-      return { added: 0, duplicates: unique.length === 0 ? parsedFixtures.length : 0, omitted: unique.length, defaultRateFixtures: 0, fixtures: [] }
-    }
-
-    setFixturePool((current) => [...current, ...fixturesToAdd])
-    setRoundFixtureIds((current) => [...current, ...fixturesToAdd.map((fixture) => fixture.id)])
-    return {
-      added: fixturesToAdd.length,
-      duplicates: parsedFixtures.length - unique.length,
-      omitted: unique.length - fixturesToAdd.length,
-      defaultRateFixtures,
-      fixtures: fixturesToAdd,
-    }
-  }
-
-  function updateAttachmentStatus(id: number, ocrStatus: string) {
-    setAttachedFiles((current) => {
-      const next = current.map((file) => file.id === id ? { ...file, ocrStatus } : file)
-      attachedFilesRef.current = next
-      return next
-    })
-  }
-
-  function errorDetails(error: unknown) {
-    if (error instanceof Error && error.message) return sanitizePlainText(error.message, 400)
-    if (typeof error === 'string' && error.trim() && error !== 'undefined' && error !== '[object Event]') {
-      return sanitizePlainText(error, 400)
-    }
-    if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' && error.message) {
-      return sanitizePlainText(error.message, 400)
-    }
-    return 'OCR worker could not load. Check the deployed /ocr assets and Content-Security-Policy.'
-  }
-
-  async function addFiles(fileList: FileList | File[]) {
-    if (isOcrRunningRef.current) {
-      setStatus('Wait for the current screenshot scan to finish before adding more images.')
-      return
-    }
-    isOcrRunningRef.current = true
-    const files = Array.from(fileList)
-    const verified: VerifiedScreenshot[] = []
-    let rejected = 0
-    let inspectionErrors = 0
-    try {
-      for (const file of files) {
-        if (!ALLOWED_IMAGE_TYPES.has(file.type) || file.size <= 0 || file.size > MAX_UPLOAD_BYTES) {
-          rejected += 1
-          continue
-        }
-        try {
-          if (!await hasSupportedImageSignature(file)) {
-            rejected += 1
-            continue
-          }
-        } catch {
-          inspectionErrors += 1
-          continue
-        }
-        attachmentIdRef.current += 1
-        verified.push({
-          file,
-          attachment: {
-            id: attachmentIdRef.current,
-            name: sanitizeFileName(file.name),
-            size: file.size,
-            ocrStatus: 'Initializing OCR...',
-          },
-        })
-      }
-      const available = Math.max(0, MAX_SCREENSHOTS - attachedFilesRef.current.length)
-      const accepted = verified.slice(0, available)
-      const capped = verified.length - accepted.length
-      attachedFilesRef.current = [...attachedFilesRef.current, ...accepted.map(({ attachment }) => attachment)]
-      setAttachedFiles(attachedFilesRef.current)
-      const messages: string[] = []
-      if (accepted.length > 0) messages.push(`${accepted.length} verified screenshot${accepted.length === 1 ? '' : 's'} attached`)
-      if (rejected > 0) messages.push(`${rejected} file${rejected === 1 ? '' : 's'} rejected (PNG, JPEG or WebP up to 10 MB only)`)
-      if (capped > 0) messages.push(`maximum ${MAX_SCREENSHOTS} screenshots allowed`)
-      if (inspectionErrors > 0) messages.push(`${inspectionErrors} file${inspectionErrors === 1 ? '' : 's'} could not be inspected`)
-      if (messages.length > 0) setStatus(messages.join('. ') + '.')
-      if (accepted.length === 0) return
-
-      const parsedFixtures: ParsedBetslipFixture[] = []
-      const scanErrors: string[] = []
-      let cleanupError = false
-      let workerFailureReason: unknown
-      let currentFileName = accepted[0].attachment.name
-      let currentAttachmentId = accepted[0].attachment.id
-      setOcrError('')
-      setRawScannedText('')
-      setOcrProgress({ attachmentId: currentAttachmentId, fileName: currentFileName, percent: 0, stage: 'Initializing OCR...' })
-      let ocrWorker: Awaited<ReturnType<typeof createWorker>> | null = null
-      try {
-        ocrWorker = await createWorker('eng', 1, {
-          workerPath: new URL('ocr/worker.min.js', new URL(import.meta.env.BASE_URL, window.location.href)).href,
-          corePath: new URL('ocr/core/tesseract-core-lstm.wasm.js', new URL(import.meta.env.BASE_URL, window.location.href)).href,
-          langPath: new URL('ocr/lang/', new URL(import.meta.env.BASE_URL, window.location.href)).href,
-          gzip: true,
-          workerBlobURL: false,
-          errorHandler: (error: unknown) => { workerFailureReason = error },
-          logger: ({ status: stage, progress }) => {
-            const recognizing = stage.toLocaleLowerCase().includes('recognizing')
-            const percent = recognizing ? Math.round(Math.max(0, Math.min(1, progress)) * 100) : 0
-            const visibleStage = recognizing ? `Scanning ${percent}%...` : `${stage.charAt(0).toUpperCase()}${stage.slice(1)}...`
-            setOcrProgress((current) => ({
-              attachmentId: currentAttachmentId,
-              fileName: currentFileName,
-              percent: recognizing && current?.fileName === currentFileName
-                ? Math.max(current.percent, percent)
-                : percent,
-              stage: visibleStage,
-            }))
-            updateAttachmentStatus(currentAttachmentId, visibleStage)
-          },
-        })
-        for (const item of accepted) {
-          currentFileName = item.attachment.name
-          currentAttachmentId = item.attachment.id
-          setOcrProgress({ attachmentId: currentAttachmentId, fileName: currentFileName, percent: 0, stage: 'Scanning 0%...' })
-          updateAttachmentStatus(currentAttachmentId, 'Scanning 0%...')
-          try {
-            const { data } = await ocrWorker.recognize(item.file)
-            setOcrProgress({ attachmentId: currentAttachmentId, fileName: currentFileName, percent: 100, stage: 'Parsing lines...' })
-            updateAttachmentStatus(currentAttachmentId, 'Parsing lines...')
-            setRawScannedText((current) => {
-              const section = `--- ${item.attachment.name} ---\n${sanitizeBetText(data.text)}`
-              return [current, section].filter(Boolean).join('\n\n').slice(-MAX_OCR_TEXT_LENGTH)
-            })
-            const parsed = parseBetslipText(data.text)
-            parsedFixtures.push(...parsed)
-            updateAttachmentStatus(currentAttachmentId, `Extracted ${parsed.length} match${parsed.length === 1 ? '' : 'es'}`)
-          } catch (error) {
-            const details = errorDetails(error ?? workerFailureReason)
-            scanErrors.push(`${item.attachment.name}: ${details}`)
-            updateAttachmentStatus(currentAttachmentId, `OCR error: ${details}`)
-          }
-        }
-      } catch (error) {
-        const details = errorDetails(error)
-        scanErrors.push(details)
-        accepted.forEach(({ attachment }) => updateAttachmentStatus(attachment.id, `OCR error: ${details}`))
-        setOcrError(details)
-      } finally {
-        if (ocrWorker) {
-          try {
-            await ocrWorker.terminate()
-          } catch {
-            cleanupError = true
-          }
-        }
-        setOcrProgress(null)
-        isOcrRunningRef.current = false
-      }
-
-      const result = addParsedFixtures(parsedFixtures)
-      const summary: string[] = []
-      if (result.added > 0) summary.push(`${result.added} fixture${result.added === 1 ? '' : 's'} added to the board`)
-      if (result.duplicates > 0) summary.push(`${result.duplicates} duplicate fixture${result.duplicates === 1 ? '' : 's'} skipped`)
-      if (result.omitted > 0) summary.push(`${result.omitted} fixture${result.omitted === 1 ? '' : 's'} could not be added because the fixture pool is full`)
-      if (parsedFixtures.length === 0 && scanErrors.length === 0) summary.push('No matchups were recognized')
-      if (scanErrors.length > 0) summary.push(`${scanErrors.length} screenshot${scanErrors.length === 1 ? '' : 's'} could not be scanned`)
-      if (cleanupError) summary.push('OCR worker cleanup failed')
-      if (summary.length === 0) summary.push('No new fixtures were found')
-      const defaultsNote = result.defaultRateFixtures > 0
-        ? ` Goal rates defaulted to λ ${OCR_DEFAULT_LAMBDA.toFixed(2)} / μ ${OCR_DEFAULT_MU.toFixed(2)} for ${result.defaultRateFixtures} fixture${result.defaultRateFixtures === 1 ? '' : 's'}.`
-        : ''
-      if (scanErrors.length > 0) setOcrError(scanErrors.join('\n'))
-      setStatus(`OCR complete: ${summary.join('; ')}.${defaultsNote}`)
-    } finally {
-      isOcrRunningRef.current = false
-    }
-  }
-
-  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const files = event.clipboardData.files
-    if (files.length > 0) addFiles(files)
-  }
-
-  function removeAttachment(id: number) {
-    attachedFilesRef.current = attachedFilesRef.current.filter((file) => file.id !== id)
-    setAttachedFiles(attachedFilesRef.current)
   }
 
   function updateCustomField(field: keyof CustomFixtureDraft, value: string) {
@@ -1166,58 +766,6 @@ function Workbench() {
         </div>
 
         <aside className="side-column">
-          <section className="intake-section" aria-labelledby="intake-heading">
-            <div className="side-heading">
-              <div><p className="eyebrow">05 / Optional input</p><h2 id="intake-heading">Betslip intake</h2></div>
-              <Clipboard size={17} />
-            </div>
-            <div
-              className={`dropzone${isDragging ? ' is-dragging' : ''}`}
-              onDragOver={(event) => { event.preventDefault(); setIsDragging(true) }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={(event) => { event.preventDefault(); setIsDragging(false); addFiles(event.dataTransfer.files) }}
-              onClick={() => fileInputRef.current?.click()}
-              onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') fileInputRef.current?.click() }}
-              role="button"
-              tabIndex={0}
-              aria-label="Upload betslip screenshot"
-            >
-              <Upload size={18} />
-              <span>Drop a screenshot or <b>browse files</b></span>
-              <small>PNG, JPG or WEBP · OCR runs locally in your browser</small>
-              <input ref={fileInputRef} type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" multiple hidden onChange={(event) => { if (event.target.files) void addFiles(event.target.files); event.target.value = '' }} />
-            </div>
-            {ocrProgress && (
-              <div className="ocr-progress" role="status" aria-live="polite">
-                <div className="ocr-progress__label"><span>{ocrProgress.stage}</span><span>{ocrProgress.fileName}</span></div>
-                <progress value={ocrProgress.percent} max={100} aria-label={`Scanning ${ocrProgress.fileName}`} />
-              </div>
-            )}
-            {ocrError && <div className="ocr-error" role="alert">OCR error: {ocrError}</div>}
-            <details className="raw-scan">
-              <summary>Raw Scanned Text</summary>
-              <pre>{rawScannedText || 'Scanned text will appear here after an image is processed.'}</pre>
-            </details>
-            {attachedFiles.length > 0 && (
-              <ul className="attachment-list" aria-label="Attached screenshots">
-                {attachedFiles.map((file) => <li key={file.id} title={`${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`}><FileImage size={14} /><span className="attachment-name">{file.name}</span><span className={`attachment-status${file.ocrStatus.startsWith('OCR error:') ? ' is-error' : ''}`}>{file.ocrStatus}</span><button type="button" aria-label={`Remove ${file.name}`} onClick={() => removeAttachment(file.id)}><Trash2 size={13} /></button></li>)}
-              </ul>
-            )}
-            <label className="paste-label" htmlFor="bet-text">Paste selections or notes</label>
-            <textarea id="bet-text" value={betText} maxLength={MAX_PASTED_TEXT_LENGTH} onChange={(event) => setBetText(sanitizeBetText(event.target.value))} onPaste={handlePaste}             placeholder={'1. Arsenal vs Chelsea\nTime: 11:00 AM\n1: 2.30 | X: 3.60 | 2: 2.95\n\nReal Madrid | Barcelona | 2.10 | 3.40 | 3.20'} rows={6} />
-                        {betText.trim() && (
-                          <p className={`parse-badge${parsedBatch.length === 0 ? ' is-empty' : ''}`} role="status" aria-live="polite">
-                            {parsedBatch.length > 0
-                              ? `Parsed ${parsedBatch.length} match${parsedBatch.length === 1 ? '' : 'es'} successfully${parsedBatch.some((item) => item.defaultedOdds > 0) ? ' · missing odds set to 2.50' : ''}`
-                              : 'No matches recognized yet'}
-                          </p>
-                        )}
-                        <button className="run-button" type="button" onClick={loadPastedMatches} disabled={parsedBatch.length === 0}>
-                          <span>Load Pasted Matches into Board</span><Clipboard size={14} />
-                        </button>
-                        <p className="intake-note">Paste numbered fixtures, CSV / tab / pipe rows or a SportyBet betslip. Matches are added to the fixture board and round lineup.</p>
-          </section>
-
           <section className="market-generator" aria-labelledby="market-generator-heading">
             <div className="side-heading">
               <div><p className="eyebrow">04 / Automated market generator</p><h2 id="market-generator-heading">Build a priced round</h2></div>
@@ -1283,7 +831,7 @@ function Workbench() {
                   <span className="section-note">{roundFixtureIds.length} match{roundFixtureIds.length === 1 ? '' : 'es'} locked in</span>
                 </div>
                 {roundFixtureIds.length === 0 ? (
-                  <div className="empty-slip"><p>Add matches from the fixture board or scan a betslip to build your round lineup.</p></div>
+                  <div className="empty-slip"><p>Add matches from the fixture board to build your round lineup.</p></div>
                 ) : (
                   <div className="round-fixtures" aria-live="polite">
                     {roundFixtureIds.map((fixtureId, index) => {
@@ -1333,17 +881,10 @@ function Workbench() {
                   </div>
                 )}
                 <div className="round-generator__actions">
-                  <button className="run-button" type="button" onClick={() => void copyRoundOutcomes()} disabled={roundFixtureIds.length === 0}>
-                    <Copy size={14} /> Copy Round Outcomes
+                  <button className="run-button" type="button" onClick={generateRoundResults} disabled={roundFixtureIds.length === 0}>
+                    <RefreshCw size={14} /> Generate Round Results
                   </button>
-                  <div className="round-generator__secondary">
-                    <button className="quiet-button" type="button" onClick={generateRoundResults} disabled={roundFixtureIds.length === 0}>
-                      <RefreshCw size={13} /> Generate Round Results
-                    </button>
-                    <a className="quiet-button" href={SPORTYBET_GH_URL} target="_blank" rel="noopener noreferrer">Open SportyBet GH ↗</a>
-                  </div>
                 </div>
-                {copyToast && <p className="copy-toast" role="status">✓ Selections copied to clipboard</p>}
               </section>
           </section>
         </aside>

@@ -1,3 +1,0 @@
-English traineddata is from @tesseract.js-data/eng@1.0.0.
-Package license: MIT.
-Source: https://github.com/naptha/tessdata
