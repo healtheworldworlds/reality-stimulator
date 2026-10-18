@@ -736,7 +736,7 @@ function Workbench() {
               </div>
               <div className="market-generator__actions">
                 <button className="run-button market-generator__submit" type="submit" disabled={isGeneratingMatches}>
-                  <Plus size={14} /> {isGeneratingMatches ? 'Fetching today’s fixtures…' : 'Generate Matches'}
+                  <Plus size={14} /> {isGeneratingMatches ? 'Fetching today’s fixtures…' : 'Click to generate matches'}
                 </button>
                 <button className="quiet-button market-generator__reroll" type="button" onClick={generateRoundResults} disabled={roundFixtureIds.length === 0}>
                   <RefreshCw size={13} /> For changing match results only
