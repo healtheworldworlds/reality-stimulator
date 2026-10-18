@@ -26,55 +26,31 @@ export function generateKickoffTimes(count: number, start: number, end: number, 
   })
 }
 
+// Marquee clubs from SportyBet-covered leagues only, so fallback pairings are always bookable.
 export const GLOBAL_CLUB_REGISTRY = {
   'Premier League': [
-    'Arsenal', 'Aston Villa', 'Bournemouth', 'Brentford', 'Brighton & Hove Albion',
-    'Burnley', 'Chelsea', 'Crystal Palace', 'Everton', 'Fulham', 'Leeds United',
-    'Liverpool', 'Manchester City', 'Manchester United', 'Newcastle United',
-    'Nottingham Forest', 'Sunderland', 'Tottenham Hotspur', 'West Ham United', 'Wolverhampton Wanderers',
+    'Arsenal', 'Chelsea', 'Liverpool', 'Manchester City', 'Manchester United',
+    'Newcastle United', 'Tottenham Hotspur', 'Aston Villa', 'West Ham United',
   ],
   'La Liga': [
-    'Athletic Club', 'Atlético Madrid', 'Barcelona', 'Celta Vigo', 'Deportivo Alavés',
-    'Elche', 'Espanyol', 'Getafe', 'Girona', 'Levante', 'Mallorca', 'Osasuna',
-    'Rayo Vallecano', 'Real Betis', 'Real Madrid', 'Real Oviedo', 'Real Sociedad',
-    'Sevilla', 'Valencia', 'Villarreal',
+    'Real Madrid', 'Barcelona', 'Atl?tico Madrid', 'Sevilla', 'Real Sociedad',
+    'Athletic Club', 'Villarreal', 'Real Betis',
   ],
   'Serie A': [
-    'Atalanta', 'Bologna', 'Cagliari', 'Como', 'Cremonese', 'Fiorentina', 'Genoa',
-    'Hellas Verona', 'Inter Milan', 'Juventus', 'Lazio', 'Lecce', 'AC Milan',
-    'Napoli', 'Parma', 'Pisa', 'Roma', 'Sassuolo', 'Torino', 'Udinese',
+    'Inter Milan', 'AC Milan', 'Juventus', 'Napoli', 'Roma', 'Lazio', 'Atalanta', 'Fiorentina',
   ],
   Bundesliga: [
-    'Augsburg', 'Bayer Leverkusen', 'Bayern Munich', 'Borussia Dortmund',
-    'Borussia Mönchengladbach', 'Eintracht Frankfurt', 'FC Heidenheim', 'Hamburger SV',
-    'Hoffenheim', 'Mainz 05', 'RB Leipzig', 'SC Freiburg', 'St. Pauli',
-    'Union Berlin', 'VfB Stuttgart', 'VfL Wolfsburg', 'Werder Bremen', 'FC Köln',
+    'Bayern Munich', 'Borussia Dortmund', 'RB Leipzig', 'Bayer Leverkusen',
+    'Eintracht Frankfurt', 'VfB Stuttgart', 'Borussia M?nchengladbach', 'VfL Wolfsburg',
   ],
   'Ligue 1': [
-    'Angers', 'Auxerre', 'Brest', 'Le Havre', 'Lens', 'Lille', 'Lorient',
-    'Lyon', 'Marseille', 'Metz', 'Monaco', 'Nantes', 'Nice', 'Paris FC',
-    'Paris Saint-Germain', 'Rennes', 'Strasbourg', 'Toulouse',
+    'Paris Saint-Germain', 'Marseille', 'Lyon', 'Monaco', 'Lille', 'Nice', 'Lens', 'Rennes',
   ],
   Eredivisie: [
-    'Ajax', 'AZ Alkmaar', 'Excelsior', 'FC Groningen', 'FC Twente', 'FC Utrecht',
-    'Feyenoord', 'Fortuna Sittard', 'Go Ahead Eagles', 'Heracles Almelo',
-    'NAC Breda', 'NEC Nijmegen', 'PEC Zwolle', 'PSV Eindhoven', 'SC Heerenveen',
-    'Sparta Rotterdam', 'Telstar', 'Willem II',
+    'Ajax', 'PSV Eindhoven', 'Feyenoord', 'AZ Alkmaar', 'FC Twente', 'FC Utrecht',
   ],
   'Primeira Liga': [
-    'Arouca', 'AVS Futebol SAD', 'Benfica', 'Boavista', 'Casa Pia', 'Estoril',
-    'Estrela da Amadora', 'FC Porto', 'Famalicão', 'Gil Vicente', 'Moreirense',
-    'Nacional', 'Rio Ave', 'Santa Clara', 'Sporting CP', 'Tondela', 'Vitória de Guimarães',
-  ],
-  'Scottish Premiership': [
-    'Aberdeen', 'Celtic', 'Dundee', 'Dundee United', 'Falkirk', 'Heart of Midlothian',
-    'Hibernian', 'Kilmarnock', 'Livingston', 'Motherwell', 'Rangers', 'St Mirren',
-  ],
-  'Süper Lig': [
-    'Alanyaspor', 'Antalyaspor', 'Başakşehir', 'Beşiktaş', 'Eyüpspor', 'Fatih Karagümrük',
-    'Fenerbahçe', 'Galatasaray', 'Gaziantep FK', 'Gençlerbirliği', 'Göztepe',
-    'Kasımpaşa', 'Kayserispor', 'Kocaelispor', 'Konyaspor', 'Rizespor',
-    'Samsunspor', 'Trabzonspor',
+    'Benfica', 'FC Porto', 'Sporting CP', 'Braga', 'Vit?ria de Guimar?es', 'Boavista',
   ],
 } as const
 

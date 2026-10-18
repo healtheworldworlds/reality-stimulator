@@ -4,7 +4,7 @@ type ApiFixture = {
     date?: string
     status?: { short?: string }
   }
-  league?: { name?: string }
+  league?: { id?: number, name?: string }
   teams?: {
     home?: { name?: string }
     away?: { name?: string }
@@ -72,7 +72,7 @@ function cleanFixtures(payload: ApiPayload) {
     if (!Number.isFinite(kickoff.getTime())) return []
     return [{
       fixture: { id, date: kickoff.toISOString(), status: { short: status } },
-      league: { name: item.league?.name?.trim() || 'Football' },
+      league: { id: item.league?.id, name: item.league?.name?.trim() || 'Football' },
       teams: { home: { name: home }, away: { name: away } },
     }]
   })

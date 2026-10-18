@@ -1,4 +1,5 @@
 import type { ClubMatchup } from '../engine/clubs'
+import { isSportyBetLeague } from '../engine/leagues'
 
 type ApiFootballFixture = {
   fixture?: {
@@ -6,7 +7,7 @@ type ApiFootballFixture = {
     date?: string
     status?: { short?: string }
   }
-  league?: { name?: string }
+  league?: { id?: number, name?: string }
   teams?: {
     home?: { name?: string }
     away?: { name?: string }
@@ -42,7 +43,7 @@ function parseFixture(item: ApiFootballFixture): LiveFixture | null {
   const date = item.fixture?.date
   const home = item.teams?.home?.name?.trim()
   const away = item.teams?.away?.name?.trim()
-  if (item.fixture?.status?.short !== 'NS' || typeof id !== 'number' || !Number.isInteger(id) || !date || !home || !away || home === away) {
+  if (!isSportyBetLeague(item.league?.id) || item.fixture?.status?.short !== 'NS' || typeof id !== 'number' || !Number.isInteger(id) || !date || !home || !away || home === away) {
     return null
   }
   const kickoffDate = new Date(date)
