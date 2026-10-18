@@ -1175,6 +1175,41 @@ h2 {
   cursor: not-allowed;
 }
 
+.booking-status {
+  margin: 10px 0 0;
+  font-size: 0.8rem;
+}
+
+.booking-status--error {
+  color: #ff6b6b;
+}
+
+.booking-result {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid currentColor;
+  text-align: center;
+}
+
+.booking-code {
+  font-size: 1.25rem;
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+
+.booking-result__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.booking-result__actions .quiet-button {
+  justify-content: center;
+  text-decoration: none;
+}
+
 .empty-slip p {
   max-width: 220px;
   margin-bottom: 11px;
