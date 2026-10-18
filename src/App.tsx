@@ -538,6 +538,9 @@ function Workbench() {
 
       <section className="intro" id="top">
         <div>
+          <a className="developer-badge" href="https://facebook.com/iamasanteprince" target="_blank" rel="noopener noreferrer">
+            Developer: @iamasanteprince
+          </a>
           <p className="eyebrow">Football simulation / Research desk 01</p>
           <h1>Simulate the match.<br /><em>Generate the round.</em></h1>
         </div>
