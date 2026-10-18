@@ -97,7 +97,7 @@ export function LiveCodesHub() {
   return (
     <section className="live-codes" aria-labelledby="live-codes-heading">
       <div className="side-heading">
-        <div><p className="eyebrow">Community feed</p><h2 id="live-codes-heading">🔥 Live community booking codes</h2></div>
+        <div><p className="eyebrow">Community feed</p><h2 id="live-codes-heading">Live community booking codes</h2></div>
       </div>
       <div className="live-codes__toolbar">
         <div className="live-codes__tabs" role="group" aria-label="Bookmaker">
