@@ -42,7 +42,7 @@ export default async function bookSportyBetHandler(request: BookRequest, respons
       response.setHeader('Allow', 'POST')
       return response.status(405).json({ success: false, error: 'Method not allowed. Use POST.' })
     }
-    const apiKey = process.env.RAPIDAPI_KEY
+    const apiKey = (process.env.RAPIDAPI_KEY || '').trim()
     if (!apiKey) {
       return response.status(500).json({ success: false, error: 'Server is missing RAPIDAPI_KEY configuration.' })
     }
@@ -71,12 +71,13 @@ export default async function bookSportyBetHandler(request: BookRequest, respons
     const code = nested?.booking_code ?? data?.booking_code
 
     if (!upstream.ok || typeof code !== 'string' || code.length === 0) {
-      const detail = typeof data?.message === 'string' ? data.message
-        : typeof data?.error === 'string' ? data.error
-          : text.slice(0, 300)
+      const detail = text.trim().slice(0, 1000) || 'empty response body'
+      console.error('[book-sportybet] upstream rejected', { url: ENDPOINT, status: upstream.status, body: detail })
       return response.status(upstream.ok ? 502 : upstream.status).json({
         success: false,
-        error: `ConvertBetCodes request failed (HTTP ${upstream.status}): ${detail || 'no booking code returned'}`,
+        error: `RapidAPI responded HTTP ${upstream.status} from ${ENDPOINT}: ${detail}`,
+        upstreamStatus: upstream.status,
+        upstreamBody: detail,
       })
     }
     return response.status(200).json({ success: true, bookingCode: code })
