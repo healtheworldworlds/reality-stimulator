@@ -143,11 +143,11 @@ export function AdminModal({ passwordRequired: initialPasswordRequired, onClose,
               type="password"
               value={masterKey}
               onChange={(event) => setMasterKey(event.target.value)}
+              placeholder="Enter Master Key"
               autoComplete="off"
               autoFocus
               required
             />
-            <p className="auth-help">Type REGINA to unlock admin controls.</p>
             {error && <p className="auth-error" role="alert">{error}</p>}
             <button className="run-button" type="submit" disabled={busy || masterKey.length === 0}>
               {busy ? 'Verifying…' : 'Unlock admin controls'}

@@ -262,7 +262,7 @@ function App() {
   const [retrySettings, setRetrySettings] = useState(0)
   const [passwordRequired, setPasswordRequired] = useState(false)
   const [unlocked, setUnlocked] = useState(false)
-  const [adminOpen, setAdminOpen] = useState(false)
+  const [isAdminOpen, setIsAdminOpen] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -309,11 +309,11 @@ function App() {
 
   return (
     <>
-      <Workbench onOpenAdmin={() => setAdminOpen(true)} />
-      {adminOpen && (
+      <Workbench onOpenAdmin={() => setIsAdminOpen(true)} />
+      {isAdminOpen && (
         <AdminModal
           passwordRequired={passwordRequired}
-          onClose={() => setAdminOpen(false)}
+          onClose={() => setIsAdminOpen(false)}
           onSaved={setPasswordRequired}
         />
       )}
