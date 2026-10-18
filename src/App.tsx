@@ -121,6 +121,8 @@ const emptyCustomFixture: CustomFixtureDraft = {
   awayOdds: '',
 }
 
+const SPORTYBET_GH_URL = 'https://www.sportybet.com/gh/'
+
 const automatedMarketLabels: Record<AutomatedMarket, string> = {
   over15: 'Over 1.5 Goals',
   secondHalfHighest: 'Second Half Highest Scoring',
@@ -415,9 +417,8 @@ function Workbench() {
   const [activeGroup, setActiveGroup] = useState<keyof typeof marketGroups>('result')
   const [generatorMarket, setGeneratorMarket] = useState<AutomatedMarket>('over15')
   const [roundMarket, setRoundMarket] = useState<AutomatedMarket>('over15')
-  const [isBooking, setIsBooking] = useState(false)
-  const [bookingCode, setBookingCode] = useState('')
-  const [bookingError, setBookingError] = useState('')
+  const [copyToast, setCopyToast] = useState(false)
+  const copyToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [matchCount, setMatchCount] = useState('17')
   const [minimumOdds, setMinimumOdds] = useState('1.20')
   const [maximumOdds, setMaximumOdds] = useState('1.50')
@@ -629,77 +630,25 @@ function Workbench() {
   }
 
   async function copyRoundOutcomes() {
-    if (roundNumber === 0 || roundFixtureIds.length === 0 || roundResults.size !== roundFixtureIds.length) {
-      setStatus('Generate a round before copying its outcomes.')
+    if (roundFixtureIds.length === 0) {
+      setStatus('Add matches to the round before copying selections.')
       return
     }
     const lines = roundFixtureIds.flatMap((id, index) => {
       const fixture = preparedFixtures.find((item) => item.id === id)
-      const result = roundResults.get(id)
-      if (!fixture || !result) return []
-      const totalGoals = result.homeGoals + result.awayGoals
-      const outcome = result.homeGoals > result.awayGoals
-        ? 'Home Win'
-        : result.homeGoals === result.awayGoals ? 'Draw' : 'Away Win'
-      const totals = (line: number) => totalGoals > line ? `Over ${line}.5` : `Under ${line}.5`
-      const bothScored = result.homeGoals > 0 && result.awayGoals > 0 ? 'GG' : 'NG'
-      const hit = marketHit(roundMarket, result)
-      const marketOutcome = `${automatedMarketLabels[roundMarket]}: ${hit ? 'Hit' : 'Miss'}`
-      const halves = roundMarket === 'secondHalfHighest' ? `, 1H ${result.firstHalfGoals}-${result.secondHalfGoals} 2H` : ''
-      return [`${index + 1}. ${fixture.home} vs ${fixture.away} (${formatKickoff(fixture.kickoff, fixture.kickoffDate)}): ${result.homeGoals}-${result.awayGoals} (${[outcome, totals(1), totals(2), bothScored, `${marketOutcome}${halves}`].join(', ')})`]
+      if (!fixture) return []
+      const pick = roundMarket === 'secondHalfHighest' ? 'Second Half Highest Scoring' : automatedMarketLabels[roundMarket]
+      const odds = roundMarket === 'over15' ? fixture.odds.over15 : roundMarket === 'over25' ? fixture.odds.over25 : null
+      return [`${index + 1}. ${fixture.home} vs ${fixture.away}\n   Market & Pick: ${pick}\n   Odds: ${odds === null ? 'N/A' : odds.toFixed(2)} · Kickoff: ${formatKickoff(fixture.kickoff, fixture.kickoffDate)}`]
     })
     try {
-      await navigator.clipboard.writeText([`Round ${roundNumber}`, ...lines].join('\n'))
-      setStatus(`Round ${roundNumber} outcomes copied.`)
+      await navigator.clipboard.writeText([...lines, '', `Book on SportyBet Ghana: ${SPORTYBET_GH_URL}`].join('\n'))
+      setStatus('Selections copied to clipboard.')
+      setCopyToast(true)
+      if (copyToastTimer.current) clearTimeout(copyToastTimer.current)
+      copyToastTimer.current = setTimeout(() => setCopyToast(false), 2000)
     } catch (error) {
-      setStatus(`Could not copy round outcomes: ${error instanceof Error ? error.message : 'clipboard unavailable'}`)
-    }
-  }
-
-  async function bookOnSportyBet() {
-    if (roundFixtureIds.length === 0) {
-      setStatus('Add matches to the round before booking.')
-      return
-    }
-    const picks: Record<AutomatedMarket, { market: string, pick: string }> = {
-      over15: { market: 'Over/Under', pick: 'Over 1.5' },
-      over25: { market: 'Over/Under', pick: 'Over 2.5' },
-      secondHalfHighest: { market: 'Highest Scoring Half', pick: '2nd Half' },
-    }
-    const matches = roundFixtureIds.flatMap((id) => {
-      const fixture = preparedFixtures.find((item) => item.id === id)
-      return fixture ? [{ home: fixture.home, away: fixture.away, ...picks[roundMarket] }] : []
-    })
-    setIsBooking(true)
-    setBookingError('')
-    setBookingCode('')
-    try {
-      const response = await fetch('/api/book-sportybet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matches }),
-      })
-      const payload = await response.json().catch(() => null) as { success?: boolean, bookingCode?: string, error?: string } | null
-      if (!response.ok || !payload?.success || !payload.bookingCode) {
-        throw new Error(payload?.error ?? `Booking failed (HTTP ${response.status}).`)
-      }
-      setBookingCode(payload.bookingCode)
-      setStatus(`SportyBet GH booking code ${payload.bookingCode} created.`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Booking failed.'
-      setBookingError(message)
-      setStatus(message)
-    } finally {
-      setIsBooking(false)
-    }
-  }
-
-  async function copyBookingCode() {
-    try {
-      await navigator.clipboard.writeText(bookingCode)
-      setStatus(`Booking code ${bookingCode} copied.`)
-    } catch (error) {
-      setStatus(`Could not copy booking code: ${error instanceof Error ? error.message : 'clipboard unavailable'}`)
+      setStatus(`Could not copy selections: ${error instanceof Error ? error.message : 'clipboard unavailable'}`)
     }
   }
 
@@ -1370,27 +1319,17 @@ function Workbench() {
                   </div>
                 )}
                 <div className="round-generator__actions">
-                  <button className="run-button" type="button" onClick={generateRoundResults} disabled={roundFixtureIds.length === 0}>
-                    <RefreshCw size={14} /> Generate Round Results
+                  <button className="run-button" type="button" onClick={() => void copyRoundOutcomes()} disabled={roundFixtureIds.length === 0}>
+                    <Copy size={14} /> Copy Round Outcomes
                   </button>
-                  <button className="quiet-button" type="button" onClick={() => void copyRoundOutcomes()} disabled={roundNumber === 0 || roundResults.size !== roundFixtureIds.length || roundFixtureIds.length === 0}>
-                    <Copy size={13} /> Copy Round Outcomes
-                  </button>
-                  <button className="quiet-button" type="button" onClick={() => void bookOnSportyBet()} disabled={isBooking || roundFixtureIds.length === 0}>
-                    Book on SportyBet GH
-                  </button>
-                </div>
-                {isBooking && <p className="booking-status" role="status">Booking ticket on SportyBet GH...</p>}
-                {bookingError && !isBooking && <p className="booking-status booking-status--error" role="alert">{bookingError}</p>}
-                {bookingCode && !isBooking && (
-                  <div className="booking-result">
-                    <strong className="booking-code">[ CODE: {bookingCode} ]</strong>
-                    <div className="booking-result__actions">
-                      <button className="quiet-button" type="button" onClick={() => void copyBookingCode()}><Copy size={13} /> Copy Code</button>
-                      <a className="quiet-button" href="https://www.sportybet.com/gh/" target="_blank" rel="noopener noreferrer">Open SportyBet GH</a>
-                    </div>
+                  <div className="round-generator__secondary">
+                    <button className="quiet-button" type="button" onClick={generateRoundResults} disabled={roundFixtureIds.length === 0}>
+                      <RefreshCw size={13} /> Generate Round Results
+                    </button>
+                    <a className="quiet-button" href={SPORTYBET_GH_URL} target="_blank" rel="noopener noreferrer">Open SportyBet GH ↗</a>
                   </div>
-                )}
+                </div>
+                {copyToast && <p className="copy-toast" role="status">✓ Selections copied to clipboard</p>}
               </section>
           </section>
         </aside>

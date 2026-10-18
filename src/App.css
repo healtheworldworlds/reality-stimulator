@@ -1175,39 +1175,24 @@ h2 {
   cursor: not-allowed;
 }
 
-.booking-status {
-  margin: 10px 0 0;
-  font-size: 0.8rem;
-}
-
-.booking-status--error {
-  color: #ff6b6b;
-}
-
-.booking-result {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid currentColor;
-  text-align: center;
-}
-
-.booking-code {
-  font-size: 1.25rem;
-  letter-spacing: 0.08em;
-  overflow-wrap: anywhere;
-}
-
-.booking-result__actions {
+.round-generator__secondary {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
 
-.booking-result__actions .quiet-button {
+.round-generator__secondary .quiet-button {
   justify-content: center;
   text-decoration: none;
+}
+
+.copy-toast {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  background: #16a34a;
+  color: #fff;
+  font-size: 0.8rem;
+  text-align: center;
 }
 
 .empty-slip p {
