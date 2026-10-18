@@ -59,7 +59,7 @@ function hasApiErrors(errors: unknown) {
   return Boolean(errors)
 }
 
-function cleanFixtures(payload: ApiPayload) {
+function cleanFixtures(payload: ApiPayload, now: number) {
   if (!Array.isArray(payload.response)) throw new Error('Invalid fixtures response.')
   return payload.response.flatMap((item): ApiFixture[] => {
     const id = item.fixture?.id
@@ -67,9 +67,9 @@ function cleanFixtures(payload: ApiPayload) {
     const status = item.fixture?.status?.short
     const home = item.teams?.home?.name?.trim()
     const away = item.teams?.away?.name?.trim()
-    if (!Number.isInteger(id) || !date || !status || !home || !away || home === away) return []
+    if (!Number.isInteger(id) || !date || status !== 'NS' || !home || !away || home === away) return []
     const kickoff = new Date(date)
-    if (!Number.isFinite(kickoff.getTime())) return []
+    if (!Number.isFinite(kickoff.getTime()) || kickoff.getTime() <= now) return []
     return [{
       fixture: { id, date: kickoff.toISOString(), status: { short: status } },
       league: { id: item.league?.id, name: item.league?.name?.trim() || 'Football' },
@@ -154,7 +154,7 @@ export default async function fixturesHandler(request: FixturesRequest, response
 
     const payload = await upstream.json() as ApiPayload
     if (hasApiErrors(payload.errors)) return response.status(502).json({ error: 'Fixture provider is unavailable.' })
-    const fixtures = cleanFixtures(payload)
+    const fixtures = cleanFixtures(payload, now)
     if (cache.size >= MAX_CACHE_ENTRIES) {
       const oldestKey = cache.keys().next().value
       if (oldestKey !== undefined) cache.delete(oldestKey)

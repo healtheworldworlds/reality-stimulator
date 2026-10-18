@@ -82,7 +82,8 @@ export async function fetchTodaysFixtures(
     const fixtures = (Array.isArray(payload.response) ? payload.response : [])
       .map(parseFixture)
       .filter((fixture): fixture is LiveFixture => fixture !== null)
-      .filter((fixture) => isKickoffInWindow(fixture.kickoff, startMinute, endMinute))
+        .filter((fixture) => Date.parse(fixture.kickoffDate) > now.getTime())
+        .filter((fixture) => isKickoffInWindow(fixture.kickoff, startMinute, endMinute))
       .filter((fixture) => {
         const matchup = [fixture.home.toLocaleLowerCase(), fixture.away.toLocaleLowerCase()].sort().join('\u0000')
         if (seenFixtures.has(fixture.id) || seenMatchups.has(matchup)) return false

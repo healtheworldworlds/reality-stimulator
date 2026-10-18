@@ -117,6 +117,10 @@ function parseClockTime(value: string) {
   return Number(match[1]) * 60 + Number(match[2])
 }
 
+function currentUtcClockTime() {
+  return new Date().toISOString().slice(11, 16)
+}
+
 function selectLiveFixtures(fixtures: LiveFixture[], count: number, startMinute: number) {
   const shuffled = [...fixtures]
   for (let index = 0; index < Math.min(count, shuffled.length); index += 1) {
@@ -270,7 +274,7 @@ function Workbench() {
   const [matchCount, setMatchCount] = useState('17')
   const [minimumOdds, setMinimumOdds] = useState('1.20')
   const [maximumOdds, setMaximumOdds] = useState('1.50')
-  const [kickoffStart, setKickoffStart] = useState('00:00')
+  const [kickoffStart, setKickoffStart] = useState(currentUtcClockTime)
   const [kickoffEnd, setKickoffEnd] = useState('23:59')
   const [roundSecondHalfShare, setRoundSecondHalfShare] = useState(0.56)
   const [marketGeneratorSummary, setMarketGeneratorSummary] = useState('')
