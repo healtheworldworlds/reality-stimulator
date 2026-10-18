@@ -912,6 +912,13 @@ h2 {
   color: var(--muted);
 }
 
+.live-code__country {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .live-code__channel {
   color: var(--muted);
   font-size: 9px;

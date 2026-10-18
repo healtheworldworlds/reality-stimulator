@@ -10,6 +10,7 @@ type LiveCode = {
   time: string
   bookie: Bookie
   channel: string
+  countryCode?: 'GH' | 'NG' | 'KE' | 'INTL'
 }
 
 type FeedPayload = {
@@ -143,6 +144,7 @@ export function LiveCodesHub() {
               <div className="live-code__tags">
                 {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}
                 <span className="live-code__time">{relativeTime(item.time, now)}</span>
+                <span className="live-code__country">{item.countryCode ?? 'INTL'} · {bookie === 'betway' ? 'BETWAY' : 'SPORTYBET'}</span>
                 <span className="live-code__channel">@{item.channel}</span>
               </div>
             </div>
@@ -151,7 +153,11 @@ export function LiveCodesHub() {
                 {copiedId === item.id ? '✓ Code Copied!' : 'Copy Code'}
               </button>
               <button className="quiet-button" type="button" onClick={() => convertCode(item)}>Convert Code ⇄</button>
-              <a className="live-code__load" href={meta.url} target="_blank" rel="noopener noreferrer">{meta.loadLabel} ↗</a>
+              {item.countryCode === 'GH' ? (
+                <a className="live-code__load" href={meta.url} target="_blank" rel="noopener noreferrer">Load Slip ↗</a>
+              ) : (
+                <a className="live-code__load" href="https://convertbetcodes.com/" target="_blank" rel="noopener noreferrer">Convert to GH ⇄</a>
+              )}
             </div>
           </li>
         ))}

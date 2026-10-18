@@ -7,6 +7,7 @@ type LiveCode = {
   time: string
   bookie: Bookie
   channel: string
+  countryCode: CountryCode
 }
 
 type CodesRequest = { method?: string }
@@ -17,18 +18,21 @@ type CodesResponse = {
   json(body: unknown): CodesResponse
 }
 
-const CHANNELS = [
-  'SportybetOfficialChannel',
-  'bookingcodes',
-  'sportybet_codes_free',
-  'sportybet_daily_slips',
-  'betcodes_hub',
-  'sportybet_nigeria_codes',
-  'sportybetkenya_official',
-  'sportybet_ghana_codes',
-  'betway_sporty_codes',
-  'sure_odds_hub',
+type CountryCode = 'GH' | 'NG' | 'KE' | 'INTL'
+
+const SOURCE_CONFIG: Array<{ channel: string, country: CountryCode }> = [
+  { channel: 'SportybetOfficialChannel', country: 'GH' },
+  { channel: 'sportybet_ghana_codes', country: 'GH' },
+  { channel: 'bookingcodes', country: 'NG' },
+  { channel: 'sportybet_nigeria_codes', country: 'NG' },
+  { channel: 'sportybetkenya_official', country: 'KE' },
+  { channel: 'betcodes_hub', country: 'INTL' },
+  { channel: 'sportybet_codes_free', country: 'INTL' },
+  { channel: 'sportybet_daily_slips', country: 'INTL' },
+  { channel: 'betway_sporty_codes', country: 'INTL' },
+  { channel: 'sure_odds_hub', country: 'INTL' },
 ]
+const CHANNELS = SOURCE_CONFIG.map((source) => source.channel)
 // Channels whose unlabeled codes are not assumed to be SportyBet
 const MIXED_CHANNELS = new Set(['betway_sporty_codes'])
 const CACHE_TTL_MS = 60_000
@@ -108,6 +112,7 @@ function extractCodes(text: string, channel: string): Array<{ bookie: Bookie, co
 }
 
 async function fetchChannel(channel: string): Promise<LiveCode[]> {
+  const countryCode = SOURCE_CONFIG.find((source) => source.channel === channel)?.country ?? 'INTL'
   const upstream = await fetch(`https://t.me/s/${channel}`, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RealitySimulator/1.0)', Accept: 'text/html' },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
@@ -125,7 +130,7 @@ async function fetchChannel(channel: string): Promise<LiveCode[]> {
     const text = htmlToText(body).trim()
     const odds = findOdds(text)
     for (const { bookie, code } of extractCodes(`${body} ${text}`, channel)) {
-      codes.push({ id: `${post}:${bookie}:${code}`, code, odds, time: new Date(postTime).toISOString(), bookie, channel })
+      codes.push({ id: `${post}:${bookie}:${code}`, code, odds, time: new Date(postTime).toISOString(), bookie, channel, countryCode })
     }
   }
   return codes
