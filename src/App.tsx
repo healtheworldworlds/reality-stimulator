@@ -750,7 +750,7 @@ function Workbench() {
           <section className="slip-section" aria-labelledby="slip-heading">
             <div className="side-heading side-heading--slip">
                 <div><p className="eyebrow">06 / Round generator</p><h2 id="slip-heading">Round outcomes <span className="count-badge">{roundFixtureIds.length}</span></h2></div>
-                {roundFixtureIds.length > 0 && <button className="icon-button" type="button" onClick={() => { setRoundFixtureIds([]); setRoundResults(new Map()) }} aria-label="Clear round lineup"><Trash2 size={15} /></button>}
+                {roundFixtureIds.length > 0 && <button className="quiet-button delete-slips-button" type="button" onClick={() => { setRoundFixtureIds([]); setRoundResults(new Map()); setRoundNumber(0) }}>Delete slips</button>}
             </div>
               <section className="round-generator" aria-label="Round outcome generator">
                 <div className="round-generator__heading">
