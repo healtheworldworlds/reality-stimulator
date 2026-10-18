@@ -576,7 +576,7 @@ h2 {
 .market-generator__market,
 .market-generator__odds,
 .market-generator__kickoff,
-.market-generator__submit {
+.market-generator__actions {
   grid-column: 1 / -1;
 }
 
@@ -593,10 +593,23 @@ h2 {
   font-size: 11px;
 }
 
-.market-generator__submit {
+.market-generator__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.market-generator__submit,
+.market-generator__reroll {
   justify-content: center;
+  min-width: 0;
   gap: 8px;
   margin-top: 0;
+}
+
+.market-generator__reroll {
+  padding: 8px;
+  text-align: center;
 }
 
 .market-generator__note,
@@ -949,23 +962,7 @@ h2 {
   text-align: right;
 }
 
-.round-generator__actions {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.round-generator__actions .run-button {
-  justify-content: center;
-  gap: 9px;
-  margin-top: 0;
-}
-
-.round-generator__actions .quiet-button {
-  justify-content: center;
-}
-
-.round-generator__actions button:disabled {
+.market-generator__actions button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

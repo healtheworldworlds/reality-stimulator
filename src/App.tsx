@@ -734,9 +734,14 @@ function Workbench() {
                   <input type="time" value={kickoffEnd} onChange={(event) => setKickoffEnd(event.target.value)} required />
                 </label>
               </div>
-              <button className="run-button market-generator__submit" type="submit" disabled={isGeneratingMatches}>
-                <Plus size={14} /> {isGeneratingMatches ? 'Fetching today’s fixtures…' : 'Generate Matches'}
-              </button>
+              <div className="market-generator__actions">
+                <button className="run-button market-generator__submit" type="submit" disabled={isGeneratingMatches}>
+                  <Plus size={14} /> {isGeneratingMatches ? 'Fetching today’s fixtures…' : 'Generate Matches'}
+                </button>
+                <button className="quiet-button market-generator__reroll" type="button" onClick={generateRoundResults} disabled={roundFixtureIds.length === 0}>
+                  <RefreshCw size={13} /> For changing match results only
+                </button>
+              </div>
             </form>
             <p className="market-generator__note">Uses today’s API-Football fixtures in UTC when available. If the API is unavailable, registry fallback pairings and kickoff times are illustrative, not scheduled fixtures.</p>
             {marketGeneratorSummary && <p className={`market-generator__summary${marketGeneratorSummary.startsWith('The model could not') || marketGeneratorSummary.startsWith('Choose') || marketGeneratorSummary.startsWith('Enter') ? ' is-error' : ''}`} role="status" aria-live="polite">{marketGeneratorSummary}</p>}
@@ -805,11 +810,6 @@ function Workbench() {
                     })}
                   </div>
                 )}
-                <div className="round-generator__actions">
-                  <button className="run-button" type="button" onClick={generateRoundResults} disabled={roundFixtureIds.length === 0}>
-                    <RefreshCw size={14} /> Generate Round Results
-                  </button>
-                </div>
               </section>
           </section>
           <LiveCodesHub />
