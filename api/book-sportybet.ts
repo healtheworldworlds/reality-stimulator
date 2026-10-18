@@ -11,8 +11,7 @@ type BookResponse = {
   json(body: unknown): BookResponse
 }
 
-const HOST = 'convert-bet-codes-api1.p.rapidapi.com'
-const ENDPOINT = process.env.CONVERT_BET_CODES_URL ?? `https://${HOST}/generate_bet_code`
+const ENDPOINT = process.env.CONVERT_BET_CODES_URL ?? 'https://convertbetcodes.com/api/generate_bet_code'
 const MAX_MATCHES = 40
 
 function isText(value: unknown, max = 120): value is string {
@@ -56,12 +55,12 @@ export default async function bookSportyBetHandler(request: BookRequest, respons
 
     const upstream = await fetch(ENDPOINT, {
       method: 'POST',
-      headers: {
-        'x-rapidapi-key': apiKey,
-        'x-rapidapi-host': HOST,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ bookmaker: 'sportybet', destination: 'sportybet:gh', selections: matches, matches }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        destination_bookie: 'sportybet:gh',
+        events: matches.map((m) => ({ home_team: m.home, away_team: m.away, market: m.market, pick: m.pick })),
+      }),
       signal: AbortSignal.timeout(20_000),
     })
     const text = await upstream.text()
@@ -75,7 +74,7 @@ export default async function bookSportyBetHandler(request: BookRequest, respons
       console.error('[book-sportybet] upstream rejected', { url: ENDPOINT, status: upstream.status, body: detail })
       return response.status(upstream.ok ? 502 : upstream.status).json({
         success: false,
-        error: `RapidAPI responded HTTP ${upstream.status} from ${ENDPOINT}: ${detail}`,
+        error: `ConvertBetCodes responded HTTP ${upstream.status} from ${ENDPOINT}: ${detail}`,
         upstreamStatus: upstream.status,
         upstreamBody: detail,
       })
