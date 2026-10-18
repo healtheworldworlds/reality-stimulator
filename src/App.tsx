@@ -1,6 +1,6 @@
 // Palette: #FAFAF8, #FFFFFF, #1A1A1A, #666660, #E5E5E0, #C85A32; type: Georgia + Inter/system sans.
 // Icons: Lucide outline set, monochrome, 1.5px stroke.
-import { useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Activity,
   ArrowDownToLine,
@@ -26,6 +26,7 @@ import { generateKickoffTimes, generateUniqueClubMatchups } from './engine/clubs
 import { formatKickoff, kickoffDateForToday } from './engine/kickoff'
 import { fetchTodaysFixtures, type LiveFixture } from './api/fixtures'
 import { LiveCodesHub } from './LiveCodesHub'
+import { AdminModal, VisitorUnlockModal } from './AdminModal'
 import './App.css'
 
 type Fixture = {
@@ -256,10 +257,72 @@ function selectionProbability(probabilities: MarketProbabilities, market: Market
 }
 
 function App() {
-  return <Workbench />
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const [settingsError, setSettingsError] = useState('')
+  const [retrySettings, setRetrySettings] = useState(0)
+  const [passwordRequired, setPasswordRequired] = useState(false)
+  const [unlocked, setUnlocked] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      try {
+        const response = await fetch('/api/auth-settings')
+        const payload = await response.json() as { passwordRequired?: boolean, error?: string }
+        if (!response.ok || typeof payload.passwordRequired !== 'boolean') {
+          throw new Error(payload.error ?? `Could not load access settings (HTTP ${response.status}).`)
+        }
+        const sessionUnlocked = payload.passwordRequired && sessionStorage.getItem('app_unlocked') === 'true'
+        if (active) {
+          setPasswordRequired(payload.passwordRequired)
+          setUnlocked(!payload.passwordRequired || sessionUnlocked)
+          setSettingsError('')
+          setSettingsLoaded(true)
+        }
+      } catch (error) {
+        if (active) {
+          setSettingsError(error instanceof Error ? error.message : 'Could not load access settings.')
+          setSettingsLoaded(true)
+        }
+      }
+    })()
+    return () => { active = false }
+  }, [retrySettings])
+
+  if (!settingsLoaded) {
+    return <main className="auth-page-status" role="status">Loading access settings…</main>
+  }
+  if (settingsError) {
+    return (
+      <main className="auth-page-status" role="alert">
+        <p>{settingsError}</p>
+        <button className="quiet-button" type="button" onClick={() => { setSettingsLoaded(false); setRetrySettings((value) => value + 1) }}>
+          Retry
+        </button>
+      </main>
+    )
+  }
+  if (passwordRequired && !unlocked) {
+    return <VisitorUnlockModal onUnlocked={() => setUnlocked(true)} />
+  }
+
+  return (
+    <>
+      <Workbench onOpenAdmin={() => setAdminOpen(true)} />
+      {adminOpen && (
+        <AdminModal
+          passwordRequired={passwordRequired}
+          onClose={() => setAdminOpen(false)}
+          onSaved={setPasswordRequired}
+        />
+      )}
+    </>
+  )
 }
 
-function Workbench() {
+function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
+  const developerBadgeTaps = useRef({ count: 0, lastTap: 0 })
   const [halfLifeDays, setHalfLifeDays] = useState(30)
   const [rho, setRho] = useState(-0.05)
   const [fixturePool, setFixturePool] = useState(fixtures)
@@ -538,7 +601,23 @@ function Workbench() {
 
       <section className="intro" id="top">
         <div>
-          <a className="developer-badge" href="https://facebook.com/iamasanteprince" target="_blank" rel="noopener noreferrer">
+          <a
+            className="developer-badge"
+            href="https://facebook.com/iamasanteprince"
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(event) => {
+              event.preventDefault()
+              const now = Date.now()
+              const taps = developerBadgeTaps.current
+              taps.count = now - taps.lastTap <= 700 ? taps.count + 1 : 1
+              taps.lastTap = now
+              if (taps.count >= 3) {
+                taps.count = 0
+                onOpenAdmin()
+              }
+            }}
+          >
             Developer: @iamasanteprince
           </a>
           <p className="eyebrow">Football simulation / Research desk 01</p>

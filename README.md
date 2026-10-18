@@ -40,7 +40,8 @@ Add custom fixtures above the fixture board. Home/draw/away prices are entered e
 
 ## Security notes
 
-- The workbench has no sign-in or access-control gate. Do not put sensitive data in the client; protect sensitive resources with server-side authentication.
+- Optional visitor password protection is managed through the hidden developer-badge admin control and `/api/auth-settings`. The requested `REGINA` master key is hard-coded for this prototype and is not suitable as a production secret; replace it with a server-only environment secret before relying on admin access.
+- Authentication settings use Vercel KV/Upstash when `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`) are configured. Without these bindings settings are stored in per-instance memory and may reset or differ across serverless instances.
 - Vite exposes `VITE_`-prefixed environment variables to browser code. Treat every such variable as public; the API-Football credential is server-only as `FOOTBALL_API_KEY`.
 - Rates, ρ, half-life, odds and simulation dimensions have engine-side bounds. Monte Carlo runs are capped at 100,000, with total fixture/pick trial budgets, and execute in a module Web Worker.
 - Vite dev/preview responses, `vercel.json`, and the static-host `public/_headers` configuration set CSP and browser security headers. CSP allows WebAssembly compilation with `wasm-unsafe-eval`; it does not allow general `unsafe-eval`. Development CSP permits Vite/React Refresh inline scripts and styles for HMR; production CSP permits neither.
