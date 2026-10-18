@@ -34,6 +34,22 @@ function parseMatches(body: unknown): BookMatch[] | null {
   return parsed
 }
 
+function pickCode(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  for (const key of ['booking_code', 'code']) {
+    const candidate = record[key]
+    if (typeof candidate === 'string' && candidate) return candidate
+  }
+  return null
+}
+
+function extractCode(data: unknown): string | null {
+  const body = data as { data?: unknown } | null
+  const inner = body?.data
+  return pickCode(Array.isArray(inner) ? inner[0] : inner) ?? pickCode(Array.isArray(data) ? data[0] : data)
+}
+
 export default async function bookSportyBetHandler(request: BookRequest, response: BookResponse) {
   response.setHeader('Cache-Control', 'no-store')
   try {
@@ -53,30 +69,29 @@ export default async function bookSportyBetHandler(request: BookRequest, respons
       })
     }
 
-    const upstream = await fetch(ENDPOINT, {
+    const upstream = await fetch(`${ENDPOINT}?api_key=${encodeURIComponent(apiKey)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        api_key: apiKey,
         destination_bookie: 'sportybet:gh',
         events: matches.map((m) => ({ home_team: m.home, away_team: m.away, market: m.market, pick: m.pick })),
       }),
       signal: AbortSignal.timeout(20_000),
     })
     const text = await upstream.text()
-    let data: { booking_code?: unknown, message?: unknown, error?: unknown } | null = null
+    let data: unknown = null
     try { data = JSON.parse(text) } catch { /* non-JSON upstream body */ }
-    const nested = (data as { data?: { booking_code?: unknown } } | null)?.data
-    const code = nested?.booking_code ?? data?.booking_code
+    const code = extractCode(data)
 
-    if (!upstream.ok || typeof code !== 'string' || code.length === 0) {
-      const detail = text.trim().slice(0, 1000) || 'empty response body'
-      console.error('[book-sportybet] upstream rejected', { url: ENDPOINT, status: upstream.status, body: detail })
+    if (!upstream.ok || !code) {
+      const message = (data as { message?: unknown } | null)?.message
+      const detail = (typeof message === 'string' && message ? message : text.trim().slice(0, 1000)) || 'empty response body'
+      console.error('[book-sportybet] upstream rejected', { url: ENDPOINT, status: upstream.status, body: text.slice(0, 1000) })
       return response.status(upstream.ok ? 502 : upstream.status).json({
         success: false,
-        error: `ConvertBetCodes responded HTTP ${upstream.status} from ${ENDPOINT}: ${detail}`,
+        error: `ConvertBetCodes responded HTTP ${upstream.status}: ${detail}`,
         upstreamStatus: upstream.status,
-        upstreamBody: detail,
+        upstreamBody: text.slice(0, 1000),
       })
     }
     return response.status(200).json({ success: true, bookingCode: code })
