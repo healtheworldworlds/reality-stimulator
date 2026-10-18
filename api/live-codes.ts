@@ -17,19 +17,18 @@ type CodesResponse = {
   json(body: unknown): CodesResponse
 }
 
-const GHANA_CHANNELS = [
+const CHANNELS = [
+  'SportybetOfficialChannel',
   'bookingcodes',
-  'sportybet_codes_gh',
-  'ghana_betting_codes',
-  'sportybetcodeshub',
-  'ghana_sure_odds',
-  'daily_bet_codes_gh',
-  'betway_ghana_codes',
 ]
 const CACHE_TTL_MS = 60_000
 const FETCH_TIMEOUT_MS = 9000
 const MAX_PER_BOOKIE = 30
-const STOP_WORDS = new Set(['BETWAY', 'BOOKING', 'SPORTY', 'SPORTYBET', 'CODE', 'CODES'])
+const STOP_WORDS = new Set([
+  'BETWAY', 'BOOKING', 'SPORTY', 'SPORTYBET', 'CODE', 'CODES',
+  'FLORIDA', 'KNICKS', 'LEAGUE', 'LOSERS', 'ASTANA',
+])
+const MAX_CODE_AGE_MS = 24 * 60 * 60 * 1000
 
 type FeedBody = {
   success: true
@@ -59,21 +58,39 @@ function findOdds(text: string) {
   return Number.isFinite(odds) && odds >= 1.01 ? odds : null
 }
 
+function isValidCode(value: string) {
+  return /^[A-Z0-9]{6,10}$/i.test(value) && /\d/.test(value) && /[A-Z]/i.test(value) &&
+    !STOP_WORDS.has(value.toUpperCase())
+}
+
+function isValidExplicitCode(value: string) {
+  return /^[A-Z0-9]{6,10}$/i.test(value) && !STOP_WORDS.has(value.toUpperCase())
+}
+
 function extractCodes(text: string, channel: string): Array<{ bookie: Bookie, code: string }> {
-  const isBetwayChannel = channel.toLowerCase().includes('betway')
   const found = new Map<string, Bookie>()
-  const tokens = [...text.matchAll(/\b[A-Z0-9]{6,10}\b/gi)]
-  for (const tokenMatch of tokens) {
-    const code = tokenMatch[0].toUpperCase()
-    if (STOP_WORDS.has(code) || !/[A-Z]/.test(code)) continue
-    const index = tokenMatch.index ?? 0
+  const explicitTokens = [
+    ...text.matchAll(/shareCode=([A-Z0-9]{6,7})/gi),
+    ...text.matchAll(/(?:Booking\s*Code|Sportybet|Code)[:\s-]+([A-Z0-9]{6,8})/gi),
+    ...text.matchAll(/\b(BW[A-Z0-9]{6,8})\b/gi),
+  ]
+  const explicitMatches = explicitTokens.map((match) => ({ code: match[1], index: match.index ?? 0, explicit: true }))
+  const standaloneMatches = [...text.matchAll(/\b[A-Z0-9]{6,10}\b/gi)]
+    .filter((match) => isValidCode(match[0]))
+    .map((match) => ({ code: match[0], index: match.index ?? 0, explicit: false }))
+  for (const { code: rawCode, index, explicit } of [...explicitMatches, ...standaloneMatches]) {
+    const code = rawCode.toUpperCase()
+    if (explicit ? !isValidExplicitCode(code) : !isValidCode(code)) continue
     const before = text.slice(Math.max(0, index - 40), index)
-    const explicitBetway = /betway/i.test(before)
-    const explicitSportyBet = /sporty\s*bet/i.test(before)
+    const labeledBetway = /betway/i.test(before)
+    const labeledSportyBet = /sporty\s*bet/i.test(before)
     let bookie: Bookie | null = null
-    if (/^BW[A-Z0-9]{6,8}$/.test(code) || explicitBetway || (isBetwayChannel && code.length >= 7)) {
+    if (/^BW[A-Z0-9]{6,8}$/.test(code) || (labeledBetway && code.length >= 7)) {
       bookie = 'betway'
-    } else if (explicitSportyBet || (!isBetwayChannel && code.length >= 6 && code.length <= 7)) {
+    } else if (labeledSportyBet || (
+      code.length <= 7 &&
+      (channel.toLowerCase() === 'sportybetofficialchannel' || channel.toLowerCase() === 'bookingcodes')
+    )) {
       bookie = 'sportybet'
     }
     if (bookie) found.set(code, bookie)
@@ -94,10 +111,12 @@ async function fetchChannel(channel: string): Promise<LiveCode[]> {
     const datetime = /<time[^>]*datetime="([^"]+)"/.exec(block)?.[1]
     const body = /<div class="tgme_widget_message_text[^"]*"[^>]*>([\s\S]*?)<\/div>/.exec(block)?.[1]
     if (!post || !datetime || !body || !Number.isFinite(Date.parse(datetime))) continue
+    const postTime = Date.parse(datetime)
+    if (Date.now() - postTime > MAX_CODE_AGE_MS) continue
     const text = htmlToText(body).trim()
     const odds = findOdds(text)
-    for (const { bookie, code } of extractCodes(text, channel)) {
-      codes.push({ id: `${post}:${bookie}:${code}`, code, odds, time: new Date(datetime).toISOString(), bookie, channel })
+    for (const { bookie, code } of extractCodes(`${body} ${text}`, channel)) {
+      codes.push({ id: `${post}:${bookie}:${code}`, code, odds, time: new Date(postTime).toISOString(), bookie, channel })
     }
   }
   return codes
@@ -114,10 +133,10 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
   const now = Date.now()
   if (cached && cached.expiresAt > now) return response.status(200).json(cached.body)
 
-  const settled = await Promise.allSettled(GHANA_CHANNELS.map(fetchChannel))
+  const settled = await Promise.allSettled(CHANNELS.map(fetchChannel))
   const all = settled.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
   const warnings = settled.flatMap((result, index) =>
-    result.status === 'rejected' ? [`${GHANA_CHANNELS[index]}: ${result.reason instanceof Error ? result.reason.message : 'feed unavailable'}`] : [],
+    result.status === 'rejected' ? [`${CHANNELS[index]}: ${result.reason instanceof Error ? result.reason.message : 'feed unavailable'}`] : [],
   )
   if (all.length === 0 && settled.every((result) => result.status === 'rejected')) {
     if (cached) return response.status(200).json(cached.body)
