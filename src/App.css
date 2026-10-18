@@ -950,6 +950,27 @@ h2 {
   line-height: 1.5;
 }
 
+.live-codes__guide {
+  margin: 8px 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.live-codes__toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line, #444);
+  border-radius: 6px;
+  background: #111;
+  color: #fff;
+  font-size: 12px;
+}
+
 .side-heading--slip h2 {
   display: flex;
   align-items: center;

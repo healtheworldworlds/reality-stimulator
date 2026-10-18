@@ -42,6 +42,7 @@ export function LiveCodesHub() {
   const [loading, setLoading] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [toast, setToast] = useState('')
   const [now, setNow] = useState(() => Date.now())
 
   const refresh = useCallback(async () => {
@@ -77,6 +78,12 @@ export function LiveCodesHub() {
   }, [])
 
   useEffect(() => {
+    if (!toast) return undefined
+    const timer = setTimeout(() => setToast(''), 2500)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  useEffect(() => {
     if (!copiedId) return undefined
     const timer = setTimeout(() => setCopiedId(null), 2000)
     return () => clearTimeout(timer)
@@ -89,6 +96,14 @@ export function LiveCodesHub() {
     } catch {
       setError('Could not copy the code. Select it manually instead.')
     }
+  }
+
+  function convertCode(item: LiveCode) {
+    window.open('https://convertbetcodes.com/', '_blank', 'noopener,noreferrer')
+    void navigator.clipboard.writeText(item.code).then(
+      () => setToast('Code copied! Opening universal converter...'),
+      () => setError('Could not copy the code. Select it manually instead.'),
+    )
   }
 
   const items = feed?.[bookie] ?? []
@@ -115,6 +130,8 @@ export function LiveCodesHub() {
         <input type="checkbox" checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} />
         Auto-refresh every 60 seconds
       </label>
+      <p className="live-codes__guide">Works with all SportyBet codes (NG, KE, GH, UG) and Betway. Click 'Convert Code ⇄' to convert any foreign slip directly for your account.</p>
+      {toast && <p className="live-codes__toast" role="status">{toast}</p>}
       {error && <p className="live-codes__error" role="alert">{error}</p>}
       {feed?.warnings?.map((warning) => <p className="live-codes__warning" key={warning}>Some channels could not refresh: {warning}</p>)}
       {!error && !loading && items.length === 0 && <p className="live-codes__empty">No {meta.label} codes found right now.</p>}
@@ -133,6 +150,7 @@ export function LiveCodesHub() {
               <button className="quiet-button" type="button" onClick={() => void copyCode(item)}>
                 {copiedId === item.id ? '✓ Code Copied!' : 'Copy Code'}
               </button>
+              <button className="quiet-button" type="button" onClick={() => convertCode(item)}>Convert Code ⇄</button>
               <a className="live-code__load" href={meta.url} target="_blank" rel="noopener noreferrer">{meta.loadLabel} ↗</a>
             </div>
           </li>

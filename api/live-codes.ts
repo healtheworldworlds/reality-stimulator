@@ -20,13 +20,24 @@ type CodesResponse = {
 const CHANNELS = [
   'SportybetOfficialChannel',
   'bookingcodes',
+  'sportybet_codes_free',
+  'sportybet_daily_slips',
+  'betcodes_hub',
+  'sportybet_nigeria_codes',
+  'sportybetkenya_official',
+  'sportybet_ghana_codes',
+  'betway_sporty_codes',
+  'sure_odds_hub',
 ]
+// Channels whose unlabeled codes are not assumed to be SportyBet
+const MIXED_CHANNELS = new Set(['betway_sporty_codes'])
 const CACHE_TTL_MS = 60_000
 const FETCH_TIMEOUT_MS = 9000
 const MAX_PER_BOOKIE = 30
 const STOP_WORDS = new Set([
   'BETWAY', 'BOOKING', 'SPORTY', 'SPORTYBET', 'CODE', 'CODES',
   'FLORIDA', 'KNICKS', 'LEAGUE', 'LOSERS', 'ASTANA',
+  'TODAY', 'FREE', 'TICKET', 'VOUCHER', 'WINNER', 'MOBILE', 'TOMORROW', 'WINNERS',
 ])
 const MAX_CODE_AGE_MS = 24 * 60 * 60 * 1000
 
@@ -59,23 +70,24 @@ function findOdds(text: string) {
 }
 
 function isValidCode(value: string) {
-  return /^[A-Z0-9]{6,10}$/i.test(value) && /\d/.test(value) && /[A-Z]/i.test(value) &&
+  return /^[A-Z0-9]{6,8}$/i.test(value) && /\d/.test(value) && /[A-Z]/i.test(value) &&
     !STOP_WORDS.has(value.toUpperCase())
 }
 
 function isValidExplicitCode(value: string) {
-  return /^[A-Z0-9]{6,10}$/i.test(value) && !STOP_WORDS.has(value.toUpperCase())
+  return /^[A-Z0-9]{6,8}$/i.test(value) && !STOP_WORDS.has(value.toUpperCase())
 }
 
 function extractCodes(text: string, channel: string): Array<{ bookie: Bookie, code: string }> {
   const found = new Map<string, Bookie>()
   const explicitTokens = [
-    ...text.matchAll(/shareCode=([A-Z0-9]{6,7})/gi),
+    ...text.matchAll(/shareCode=([A-Z0-9]{6,8})/gi),
+    ...text.matchAll(/\/m\/code-hub\/([A-Z0-9]{6,8})/gi),
     ...text.matchAll(/(?:Booking\s*Code|Sportybet|Code)[:\s-]+([A-Z0-9]{6,8})/gi),
     ...text.matchAll(/\b(BW[A-Z0-9]{6,8})\b/gi),
   ]
   const explicitMatches = explicitTokens.map((match) => ({ code: match[1], index: match.index ?? 0, explicit: true }))
-  const standaloneMatches = [...text.matchAll(/\b[A-Z0-9]{6,10}\b/gi)]
+  const standaloneMatches = [...text.matchAll(/\b[A-Z0-9]{6,8}\b/g)]
     .filter((match) => isValidCode(match[0]))
     .map((match) => ({ code: match[0], index: match.index ?? 0, explicit: false }))
   for (const { code: rawCode, index, explicit } of [...explicitMatches, ...standaloneMatches]) {
@@ -87,10 +99,7 @@ function extractCodes(text: string, channel: string): Array<{ bookie: Bookie, co
     let bookie: Bookie | null = null
     if (/^BW[A-Z0-9]{6,8}$/.test(code) || (labeledBetway && code.length >= 7)) {
       bookie = 'betway'
-    } else if (labeledSportyBet || (
-      code.length <= 7 &&
-      (channel.toLowerCase() === 'sportybetofficialchannel' || channel.toLowerCase() === 'bookingcodes')
-    )) {
+    } else if (labeledSportyBet || (code.length <= 8 && !MIXED_CHANNELS.has(channel.toLowerCase()))) {
       bookie = 'sportybet'
     }
     if (bookie) found.set(code, bookie)
