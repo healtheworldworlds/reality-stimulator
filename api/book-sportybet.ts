@@ -57,9 +57,9 @@ export default async function bookSportyBetHandler(request: BookRequest, respons
       response.setHeader('Allow', 'POST')
       return response.status(405).json({ success: false, error: 'Method not allowed. Use POST.' })
     }
-    const apiKey = (process.env.RAPIDAPI_KEY || '').trim()
+    const apiKey = (process.env.RAPIDAPI_KEY || process.env.CONVERT_BET_CODES_KEY || '').trim()
     if (!apiKey) {
-      return response.status(500).json({ success: false, error: 'Server is missing RAPIDAPI_KEY configuration.' })
+      return response.status(500).json({ success: false, error: 'RAPIDAPI_KEY environment variable is not defined on the server.' })
     }
     const matches = parseMatches(request.body)
     if (!matches) {
@@ -69,7 +69,10 @@ export default async function bookSportyBetHandler(request: BookRequest, respons
       })
     }
 
-    const upstream = await fetch(`${ENDPOINT}?api_key=${encodeURIComponent(apiKey)}`, {
+    const targetUrl = new URL(ENDPOINT)
+    targetUrl.searchParams.set('api_key', apiKey)
+    console.log('[book-sportybet] POST', `${ENDPOINT}?api_key=${apiKey.slice(0, 5)}...`)
+    const upstream = await fetch(targetUrl.toString(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
