@@ -10,7 +10,7 @@ type LiveCode = {
   time: string
   bookie: Bookie
   channel: string
-  countryCode?: 'GHANA' | 'NIGERIA' | 'KENYA' | 'GLOBAL'
+  countryCode?: 'GHANA' | 'NIGERIA' | 'KENYA' | 'TANZANIA' | 'ZAMBIA' | 'SOUTH AFRICA'
 }
 
 type FeedPayload = {
@@ -142,7 +142,7 @@ export function LiveCodesHub() {
             <div className="live-code__main">
               <strong className="live-code__code">{item.code}</strong>
               <span className="live-code__country">
-                {item.countryCode ?? 'GLOBAL'}
+                {item.countryCode ?? 'NIGERIA'}
               </span>
             </div>
             <div className="live-code__tags">

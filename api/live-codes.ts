@@ -18,19 +18,23 @@ type CodesResponse = {
   json(body: unknown): CodesResponse
 }
 
-type CountryCode = 'GHANA' | 'NIGERIA' | 'KENYA' | 'GLOBAL'
+type CountryCode = 'GHANA' | 'NIGERIA' | 'KENYA' | 'TANZANIA' | 'ZAMBIA' | 'SOUTH AFRICA'
+
+const DEFAULT_COUNTRY: CountryCode = 'NIGERIA'
 
 const SOURCE_CONFIG: Array<{ channel: string, country: CountryCode }> = [
-  { channel: 'bookingcodes', country: 'NIGERIA' },
-  { channel: 'sportybet_codes_free', country: 'NIGERIA' },
-  { channel: 'sportybet_nigeria_codes', country: 'NIGERIA' },
-  { channel: 'SportybetOfficialChannel', country: 'GLOBAL' },
-  { channel: 'betcodes_hub', country: 'GLOBAL' },
   { channel: 'sportybet_ghana_codes', country: 'GHANA' },
+  { channel: 'SportybetOfficialChannel', country: 'NIGERIA' },
+  { channel: 'bookingcodes', country: 'NIGERIA' },
+  { channel: 'sportybet_nigeria_codes', country: 'NIGERIA' },
+  { channel: 'sportybet_codes_free', country: 'NIGERIA' },
+  { channel: 'betcodes_hub', country: 'NIGERIA' },
   { channel: 'sportybetkenya_official', country: 'KENYA' },
-  { channel: 'sportybet_daily_slips', country: 'GLOBAL' },
-  { channel: 'betway_sporty_codes', country: 'GLOBAL' },
-  { channel: 'sure_odds_hub', country: 'GLOBAL' },
+  { channel: 'sportybet_kenya_slips', country: 'KENYA' },
+  { channel: 'sportybet_tanzania', country: 'TANZANIA' },
+  { channel: 'sportybet_tz_codes', country: 'TANZANIA' },
+  { channel: 'sportybet_zambia', country: 'ZAMBIA' },
+  { channel: 'sportybet_southafrica', country: 'SOUTH AFRICA' },
 ]
 const CHANNELS = SOURCE_CONFIG.map((source) => source.channel)
 // Channels whose unlabeled codes are not assumed to be SportyBet
@@ -111,7 +115,7 @@ function extractCodes(text: string, channel: string): Array<{ bookie: Bookie, co
 }
 
 async function fetchChannel(channel: string): Promise<LiveCode[]> {
-  const countryCode = SOURCE_CONFIG.find((source) => source.channel === channel)?.country ?? 'GLOBAL'
+  const countryCode = SOURCE_CONFIG.find((source) => source.channel === channel)?.country ?? DEFAULT_COUNTRY
   const upstream = await fetch(`https://t.me/s/${channel}`, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RealitySimulator/1.0)', Accept: 'text/html' },
     signal: AbortSignal.timeout(4000),
