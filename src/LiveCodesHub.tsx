@@ -29,11 +29,9 @@ const BOOKIES: Record<Bookie, { label: string, loadLabel: string, url: string }>
 
 const COUNTRY_NAMES = { GH: 'GHANA', NG: 'NIGERIA', KE: 'KENYA' } as const
 
-function countryLabel(country: LiveCode['countryCode'], bookie: Bookie) {
-  if (country === 'GH' || country === 'NG' || country === 'KE') {
-    return `${COUNTRY_NAMES[country]} · ${bookie === 'betway' ? 'BETWAY' : 'SPORTYBET'}`
-  }
-  return 'GLOBAL · MULTI-BOOKIE'
+function countryLabel(country: LiveCode['countryCode']) {
+  if (country === 'GH' || country === 'NG' || country === 'KE') return COUNTRY_NAMES[country]
+  return 'GLOBAL'
 }
 
 function relativeTime(iso: string, now: number) {
@@ -150,8 +148,8 @@ export function LiveCodesHub() {
           <li className="live-code" key={item.id}>
             <div className="live-code__main">
               <strong className="live-code__code">{item.code}</strong>
-              <span className={`live-code__country live-code__country--${(item.countryCode ?? 'INTL').toLowerCase()}`}>
-                {countryLabel(item.countryCode, bookie)}
+              <span className="live-code__country">
+                {countryLabel(item.countryCode)}
               </span>
             </div>
             <div className="live-code__tags">

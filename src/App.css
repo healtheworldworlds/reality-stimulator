@@ -915,31 +915,13 @@ h2 {
 
 .live-code__country {
   display: inline-block;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: #6b7280;
-  color: #fff;
+  color: var(--text);
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   line-height: 1.2;
   text-transform: uppercase;
   white-space: nowrap;
-}
-
-.live-code__country--gh {
-  background: #f5b301;
-  color: #1a1a1a;
-}
-
-.live-code__country--ng {
-  background: #1e6b34;
-  color: #fff;
-}
-
-.live-code__country--ke {
-  background: #8b1230;
-  color: #fff;
 }
 
 .live-code__channel {
