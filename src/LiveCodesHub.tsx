@@ -10,7 +10,7 @@ type LiveCode = {
   time: string
   bookie: Bookie
   channel: string
-  countryCode?: 'GH' | 'NG' | 'KE' | 'INTL'
+  countryCode?: 'GHANA' | 'NIGERIA' | 'KENYA' | 'GLOBAL'
 }
 
 type FeedPayload = {
@@ -25,13 +25,6 @@ type FeedPayload = {
 const BOOKIES: Record<Bookie, { label: string }> = {
   sportybet: { label: 'SportyBet GH' },
   betway: { label: 'Betway' },
-}
-
-const COUNTRY_NAMES = { GH: 'GHANA', NG: 'NIGERIA', KE: 'KENYA' } as const
-
-function countryLabel(country: LiveCode['countryCode']) {
-  if (country === 'GH' || country === 'NG' || country === 'KE') return COUNTRY_NAMES[country]
-  return 'GLOBAL'
 }
 
 function relativeTime(iso: string, now: number) {
@@ -149,7 +142,7 @@ export function LiveCodesHub() {
             <div className="live-code__main">
               <strong className="live-code__code">{item.code}</strong>
               <span className="live-code__country">
-                {countryLabel(item.countryCode)}
+                {item.countryCode ?? 'GLOBAL'}
               </span>
             </div>
             <div className="live-code__tags">
