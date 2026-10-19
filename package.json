@@ -7,6 +7,9 @@
     "dev": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "oxlint src vite.config.ts",
+    "book:2h": "node scripts/generate-slips.js --market=2H_HIGHEST --legs=14 --slips=100",
+    "book:over15": "node scripts/generate-slips.js --market=OVER_1_5 --legs=17 --slips=100",
+    "book:over25": "node scripts/generate-slips.js --market=OVER_2_5 --legs=14 --slips=100",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -21,6 +24,7 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
     "oxlint": "^1.81.0",
+    "playwright": "^1.64.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
