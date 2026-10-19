@@ -1,0 +1,55 @@
+﻿name: Generate Slips Cloud Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      market:
+        description: 'Target Market'
+        required: true
+        default: 'OVER_1_5'
+        type: choice
+        options:
+          - OVER_1_5
+          - OVER_2_5
+          - 2H_HIGHEST
+      legs:
+        description: 'Legs per slip'
+        required: true
+        default: '14'
+      slips:
+        description: 'Total slips count'
+        required: true
+        default: '5'
+
+jobs:
+  run-worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Project Dependencies
+        run: npm ci
+
+      - name: Install Playwright & System Dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Match Automation Script
+        run: |
+          node scripts/generate-slips.js --market=${{ github.event.inputs.market }} --legs=${{ github.event.inputs.legs }} --slips=${{ github.event.inputs.slips }}
+
+      - name: Upload Generated Codes
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: generated-booking-codes
+          path: generated_codes.txt
+          if-no-files-found: warn
