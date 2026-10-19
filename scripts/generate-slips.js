@@ -8,7 +8,7 @@ const getArg = (key, fallback) => {
 };
 
 const MARKET = getArg('market', 'OVER_1_5');
-const LEGS = parseInt(getArg('legs', '5'), 10);
+const LEGS = parseInt(getArg('legs', '3'), 10);
 const SLIPS = parseInt(getArg('slips', '2'), 10);
 const OUT_FILE = 'generated_codes.txt';
 
@@ -23,65 +23,72 @@ const OUT_FILE = 'generated_codes.txt';
   const page = await context.newPage();
 
   try {
-    await page.goto('https://www.sportybet.com/gh/m/sport/football/today', { waitUntil: 'domcontentloaded', timeout: 35000 });
-    await page.waitForTimeout(3000);
+    await page.goto('https://www.sportybet.com/gh/m/sport/football/today', { waitUntil: 'domcontentloaded', timeout: 40000 });
+    await page.waitForTimeout(4000);
 
-    // Switch to Over/Under tab if selected
+    // Switch to O/U tab
     if (MARKET.startsWith('OVER')) {
-      const ouTab = page.locator('.m-market-tab, span, div').filter({ hasText: /^O\/U$/i }).first();
-      if (await ouTab.isVisible({ timeout: 5000 })) {
+      const ouTab = page.locator('span, div, .m-market-tab').filter({ hasText: /^O\/U$/i }).first();
+      if (await ouTab.isVisible({ timeout: 6000 })) {
         await ouTab.click();
-        await page.waitForTimeout(2000);
+        await page.waitForTimeout(2500);
       }
-    }
-
-    // Scroll to reveal matches
-    for (let i = 0; i < 6; i++) {
-      await page.mouse.wheel(0, 1000);
-      await page.waitForTimeout(800);
     }
 
     for (let s = 1; s <= SLIPS; s++) {
-      // Find visible odds selection buttons
-      const buttons = await page.locator('.m-outcome, .m-table-cell, .m-odds-btn').all();
       let picked = 0;
+      let scrollAttempts = 0;
 
-      for (const btn of buttons) {
-        if (picked >= LEGS) break;
-        try {
-          if (await btn.isVisible()) {
-            await btn.scrollIntoViewIfNeeded();
-            await btn.click({ timeout: 2000 });
-            picked++;
-            await page.waitForTimeout(400);
-          }
-        } catch (_) {}
+      while (picked < LEGS && scrollAttempts < 15) {
+        const buttons = await page.locator('.m-outcome, .m-table-cell, .m-odds-btn').all();
+
+        for (const btn of buttons) {
+          if (picked >= LEGS) break;
+          try {
+            if (await btn.isVisible()) {
+              const text = await btn.innerText().catch(() => '');
+              // Avoid buttons that are already selected or inactive
+              const isSelected = await btn.evaluate(el => el.classList.contains('m-outcome--selected') || el.classList.contains('active')).catch(() => false);
+              if (!isSelected && text && text.trim().length > 0) {
+                await btn.click({ timeout: 1500 });
+                picked++;
+                await page.waitForTimeout(600);
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (picked < LEGS) {
+          await page.mouse.wheel(0, 1200);
+          await page.waitForTimeout(1000);
+          scrollAttempts++;
+        }
       }
 
-      console.log(`[Slip ${s}/${SLIPS}] Added ${picked}/${LEGS} selections`);
+      console.log(`[Slip ${s}/${SLIPS}] Total picks gathered: ${picked}/${LEGS}`);
 
       if (picked >= LEGS) {
-        // Open betslip
+        // Open Betslip
         const betslip = page.locator('.m-betslip-btn, .m-bottom-nav-item, [class*="betslip"]').first();
         await betslip.click();
-        await page.waitForTimeout(1500);
+        await page.waitForTimeout(2000);
 
         // Click Book Bet / Share Code
         const bookBtn = page.locator('button, .m-btn').filter({ hasText: /book/i }).first();
-        if (await bookBtn.isVisible({ timeout: 5000 })) {
+        if (await bookBtn.isVisible({ timeout: 6000 })) {
           await bookBtn.click();
-          await page.waitForTimeout(2000);
+          await page.waitForTimeout(2500);
 
           // Extract code
           const codeEl = page.locator('.m-booking-code, .m-code, [class*="code"]').first();
           const codeText = await codeEl.textContent({ timeout: 5000 }).catch(() => null);
-          const cleanCode = codeText ? codeText.trim().replace(/[^A-Z0-9]/gi, '') : 'BOOKED';
+          const cleanCode = codeText ? codeText.trim().replace(/[^A-Z0-9]/gi, '') : 'GENERATED';
 
           const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Market: ${MARKET} | Legs: ${LEGS}\n`;
-          console.log(`SUCCESS: ${entry.trim()}`);
+          console.log(`>>> BOOKED: ${entry.trim()}`);
           fs.appendFileSync(OUT_FILE, entry);
 
-          // Clear betslip for next slip
+          // Remove all selections to reset the betslip cleanly
           const removeAll = page.locator('button, span').filter({ hasText: /remove all|clear/i }).first();
           if (await removeAll.isVisible({ timeout: 3000 })) {
             await removeAll.click();
@@ -91,9 +98,8 @@ const OUT_FILE = 'generated_codes.txt';
       }
     }
   } catch (err) {
-    console.error(`Script error: ${err.message}`);
+    console.error(`Execution error: ${err.message}`);
   } finally {
     await browser.close();
-    console.log('Worker finished. Artifacts saved.');
   }
 })();
