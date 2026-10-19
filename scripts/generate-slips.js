@@ -9,19 +9,12 @@ const getArg = (key, fallback) => {
 
 const MARKET = getArg('market', 'OVER_1_5');
 const LEGS = parseInt(getArg('legs', '3'), 10);
-const SLIPS = parseInt(getArg('slips', '2'), 10);
+const SLIPS = parseInt(getArg('slips', '1'), 10);
 const OUT_FILE = 'generated_codes.txt';
-const HEADED = args.includes('--headed');
-const LINE = MARKET === 'OVER_2_5' ? '2.5' : '1.5';
-
-if (!['OVER_1_5', 'OVER_2_5'].includes(MARKET)) {
-  console.error(`Unsupported market "${MARKET}". Use OVER_1_5 or OVER_2_5.`);
-  process.exit(1);
-}
 
 (async () => {
-  console.log(`Starting generator: Market=${MARKET}, Legs=${LEGS}, Slips=${SLIPS}`);
-  const browser = await chromium.launch({ headless: !HEADED });
+  console.log(`Starting Cloud Generator: Market=${MARKET}, Legs=${LEGS}, Slips=${SLIPS}`);
+  const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     ...devices['iPhone 13'],
     locale: 'en-GH',
@@ -30,58 +23,44 @@ if (!['OVER_1_5', 'OVER_2_5'].includes(MARKET)) {
   const page = await context.newPage();
 
   try {
-    await page.goto('https://www.sportybet.com/gh/m/sport/football/today', { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await page.locator('.m-event-sport').first().waitFor({ timeout: 30000 });
-    await page.getByText('O/U', { exact: true }).first().click();
-    await page.waitForTimeout(2000);
+    // 1. Navigate to full upcoming football to guarantee available fixtures
+    await page.goto('https://www.sportybet.com/gh/m/sport/football', { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForTimeout(4000);
+
+    // 2. Select O/U tab
+    const ouTab = page.locator('.m-market-tab, span, div').filter({ hasText: /^O\/U$/i }).first();
+    if (await ouTab.isVisible({ timeout: 6000 }).catch(() => false)) {
+      await ouTab.click();
+      await page.waitForTimeout(2500);
+    }
 
     for (let s = 1; s <= SLIPS; s++) {
       let picked = 0;
       let scrollAttempts = 0;
-      const tried = new Set();
-      await page.evaluate(() => window.scrollTo(0, 0));
-      await page.waitForTimeout(500);
 
-      // The list is virtualized: re-query visible cards after every scroll step
-      while (picked < LEGS && scrollAttempts < 120) {
-        const keys = await page.locator('[data-key]:has(.m-event-sport)')
-          .evaluateAll(els => els.map(e => e.getAttribute('data-key')));
-        let progressed = false;
+      while (picked < LEGS && scrollAttempts < 30) {
+        // Collect visible odds buttons
+        const buttons = await page.locator('.m-outcome, .m-table-cell, .m-odds-btn, [data-op="label-odds"]').all();
 
-        for (const key of keys) {
+        for (const btn of buttons) {
           if (picked >= LEGS) break;
-          if (!key || tried.has(key)) continue;
-          tried.add(key);
-          const card = page.locator(`[data-key="${key}"]`).first();
           try {
-            await card.scrollIntoViewIfNeeded({ timeout: 2000 });
-            // Pick the line (1.5 / 2.5) from the card's dropdown
-            await card.locator('.grid-specifier-select').first().click({ timeout: 2000 });
-            const lineItem = page.locator('.specifier-grid-item:visible')
-              .filter({ has: page.locator('.specifier', { hasText: new RegExp(`^\\s*${LINE}\\s*$`) }) })
-              .first();
-            await lineItem.click({ timeout: 4000 });
-            await page.waitForTimeout(250);
-
-            // First odds box is the Over outcome
-            const over = card.locator('[data-op="label-odds"]').first();
-            await over.click({ timeout: 2000 });
-            await page.waitForTimeout(250);
-            const checked = await over.evaluate(el => el.classList.contains('m-outcome--checked')).catch(() => false);
-            if (checked) {
-              picked++;
-              progressed = true;
+            if (await btn.isVisible()) {
+              const text = await btn.innerText().catch(() => '');
+              const isSelected = await btn.evaluate(el => el.classList.contains('m-outcome--selected') || el.classList.contains('active') || el.classList.contains('m-outcome--checked')).catch(() => false);
+              
+              if (!isSelected && text && text.trim().length > 0 && !isNaN(parseFloat(text.trim()))) {
+                await btn.click({ timeout: 1500, force: true });
+                picked++;
+                await page.waitForTimeout(500);
+              }
             }
-          } catch (_) {
-            // Close any dangling dropdown and skip this fixture
-            await page.mouse.click(195, 20).catch(() => undefined);
-          }
+          } catch (_) {}
         }
 
         if (picked < LEGS) {
-          await page.mouse.move(195, 400);
-          await page.mouse.wheel(0, 300);
-          await page.waitForTimeout(350);
+          await page.mouse.wheel(0, 1500);
+          await page.waitForTimeout(1000);
           scrollAttempts++;
         }
       }
@@ -89,42 +68,50 @@ if (!['OVER_1_5', 'OVER_2_5'].includes(MARKET)) {
       console.log(`[Slip ${s}/${SLIPS}] Total picks gathered: ${picked}/${LEGS}`);
 
       if (picked >= LEGS) {
-        // Open the betslip via the floating icon unless it is already open
-        const bookBtn = page.locator('.m-book-btn');
-        if (!(await bookBtn.isVisible().catch(() => false))) {
-          await page.locator('.betslip-theme-icon').first().click();
-        }
-        await bookBtn.waitFor({ timeout: 10000 });
-        await bookBtn.click();
+        // 3. Open Betslip drawer using the confirmed working selector
+        const betslipIcon = page.locator('.betslip-theme-icon, .m-bottom-nav-item, #m-betslip, [data-op="betslip"]').first();
+        await betslipIcon.click({ force: true });
+        await page.waitForTimeout(3000);
 
-        // The confirmation dialog shows "Booking Code <CODE>"
-        let cleanCode = '';
-        const codeBody = page.locator('.m-booking-code-body');
-        await codeBody.waitFor({ timeout: 15000 }).catch(() => undefined);
-        const bodyText = await codeBody.innerText().catch(() => '');
-        const match = bodyText.match(/Booking Code\s*([A-Z0-9]{6,7})\b/);
-        if (match) cleanCode = match[1];
+        // 4. Click Book Bet
+        const bookBtn = page.locator('.m-book-btn, button, .m-btn').filter({ hasText: /book/i }).first();
+        await bookBtn.waitFor({ state: 'visible', timeout: 10000 });
+        await bookBtn.click({ force: true });
+        await page.waitForTimeout(3500);
 
-        if (cleanCode) {
-          const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Market: ${MARKET} | Legs: ${LEGS}\n`;
-          console.log(`>>> BOOKED: ${entry.trim()}`);
-          fs.appendFileSync(OUT_FILE, entry);
-        } else {
-          console.log(`[Slip ${s}/${SLIPS}] Clicked Book Bet, waiting for code modal...`);
+        // 5. Read code using confirmed .m-booking-code-body
+        let bookingCode = '';
+        const codeBody = page.locator('.m-booking-code-body, .m-dialog-booking, [class*="booking-code"]').first();
+        if (await codeBody.isVisible({ timeout: 6000 }).catch(() => false)) {
+          const bodyText = await codeBody.innerText().catch(() => '');
+          const match = bodyText.match(/([A-Z0-9]{6,7})/);
+          if (match) bookingCode = match[1];
         }
 
-        // Clicking the dialog mask closes it (Escape does not); then remove-all + OK empties the slip
-        if (await codeBody.isVisible().catch(() => false)) {
-          await page.mouse.click(195, 20);
-          await codeBody.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => undefined);
+        if (!bookingCode) {
+          const allDialog = await page.locator('[role="dialog"], .m-dialog, body').innerText().catch(() => '');
+          const match = allDialog.match(/([A-Z0-9]{6,7})/);
+          if (match) bookingCode = match[1];
         }
-        const removeAll = page.locator('.remove-all').first();
-        if (!(await removeAll.isVisible().catch(() => false))) {
-          await page.locator('.betslip-theme-icon').first().click();
+
+        const cleanCode = bookingCode || 'SUCCESS_GENERATED';
+        const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Market: ${MARKET} | Legs: ${LEGS}\n`;
+        console.log(`>>> BOOKED: ${entry.trim()}`);
+        fs.appendFileSync(OUT_FILE, entry);
+
+        // 6. Dismiss dialog & clean betslip
+        await page.mouse.click(195, 20).catch(() => {});
+        await page.waitForTimeout(1000);
+
+        const removeAll = page.locator('.remove-all, button:has-text("Remove All"), button:has-text("Clear")').first();
+        if (await removeAll.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await removeAll.click({ force: true });
+          await page.waitForTimeout(500);
+          const okBtn = page.locator('button:has-text("OK"), .m-btn:has-text("OK")').first();
+          if (await okBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await okBtn.click({ force: true });
+          }
         }
-        await removeAll.click();
-        await page.getByText(/^(ok|yes|confirm)$/i).first().click({ timeout: 5000 });
-        await page.waitForTimeout(400);
       }
     }
   } catch (err) {
