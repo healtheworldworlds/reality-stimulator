@@ -23,7 +23,7 @@ const OUT_FILE = 'generated_codes.txt';
   const page = await context.newPage();
 
   try {
-    await page.goto('https://www.sportybet.com/gh/m/sport/football', { waitUntil: 'domcontentloaded', timeout: 40000 });
+    await page.goto('https://www.sportybet.com/gh/m/sport/football', { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(4000);
 
     if (MARKET.startsWith('OVER')) {
@@ -66,35 +66,63 @@ const OUT_FILE = 'generated_codes.txt';
       console.log(`[Slip ${s}/${SLIPS}] Total picks gathered: ${picked}/${LEGS}`);
 
       if (picked >= LEGS) {
-        // Clean valid selector for the bottom bar floating betslip
-        const betslip = page.locator('#m-betslip, .m-betslip, [data-op="betslip"], .m-bottom-nav-item:has-text("Betslip")').first();
-        if (await betslip.isVisible({ timeout: 4000 })) {
-          await betslip.click();
-        } else {
-          // Bottom center/right tap fallback
-          await page.mouse.click(300, 800);
-        }
+        // Open the betslip drawer using the bottom bar badge
+        const betslipBadge = page.locator('.m-bottom-nav .m-icon-betslip, [data-op="betslip"], .m-betslip-badge, .m-bottom-nav-item').first();
+        await betslipBadge.click({ force: true });
         await page.waitForTimeout(3000);
 
-        // Click Book Bet inside betslip drawer
-        const bookBtn = page.locator('button, .m-btn, .m-betslip-book').filter({ hasText: /book/i }).first();
-        if (await bookBtn.isVisible({ timeout: 8000 })) {
-          await bookBtn.click();
-          await page.waitForTimeout(3500);
+        // Click Book Bet / Share Code button
+        const bookBtn = page.locator('button, .m-btn, .m-betslip-book, [data-op="book"]').filter({ hasText: /book/i }).first();
+        await bookBtn.waitFor({ state: 'visible', timeout: 8000 });
+        await bookBtn.click({ force: true });
+        await page.waitForTimeout(3500);
 
-          const codeEl = page.locator('.m-booking-code, .m-code, .share-code, [class*="code"]').first();
-          const codeText = await codeEl.textContent({ timeout: 6000 }).catch(() => null);
-          const cleanCode = codeText ? codeText.trim().replace(/[^A-Z0-9]/gi, '') : 'GENERATED';
+        // Extract the SportyBet Ghana booking code
+        const codeLocators = [
+          '.m-booking-code',
+          '.m-code',
+          '.share-code',
+          '.booking-code',
+          '.m-dialog-booking .code',
+          '[class*="booking-code"]'
+        ];
 
+        let cleanCode = '';
+        for (const sel of codeLocators) {
+          const el = page.locator(sel).first();
+          if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
+            const raw = await el.innerText().catch(() => '');
+            if (raw && raw.trim().length >= 4) {
+              cleanCode = raw.trim().replace(/[^A-Z0-9]/gi, '');
+              break;
+            }
+          }
+        }
+
+        if (!cleanCode) {
+          // If modal text contains the code in a paragraph or heading
+          const dialogText = await page.locator('.m-dialog, .m-modal, [role="dialog"]').innerText().catch(() => '');
+          const match = dialogText.match(/[A-Z0-9]{6,7}/);
+          if (match) cleanCode = match[0];
+        }
+
+        if (cleanCode) {
           const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Market: ${MARKET} | Legs: ${LEGS}\n`;
           console.log(`>>> BOOKED: ${entry.trim()}`);
           fs.appendFileSync(OUT_FILE, entry);
+        } else {
+          console.log(`[Slip ${s}/${SLIPS}] Clicked Book Bet, waiting for code modal...`);
+        }
 
-          const removeAll = page.locator('button, span, .m-icon-delete').filter({ hasText: /remove all|clear/i }).first();
-          if (await removeAll.isVisible({ timeout: 3000 })) {
-            await removeAll.click();
-            await page.waitForTimeout(1000);
-          }
+        // Cleanly clear selections for the next slip
+        const removeAll = page.locator('button, span, .m-icon-delete, [data-op="remove-all"]').filter({ hasText: /remove all|clear/i }).first();
+        if (await removeAll.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await removeAll.click({ force: true });
+          await page.waitForTimeout(1000);
+        } else {
+          // Close drawer if remove-all is not visible
+          await page.keyboard.press('Escape');
+          await page.waitForTimeout(1000);
         }
       }
     }
