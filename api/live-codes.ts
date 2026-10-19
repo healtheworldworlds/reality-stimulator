@@ -18,16 +18,16 @@ type CodesResponse = {
   json(body: unknown): CodesResponse
 }
 
-type CountryCode = 'GHANA' | 'NIGERIA' | 'KENYA' | 'TANZANIA' | 'ZAMBIA' | 'SOUTH AFRICA'
+type CountryCode = 'GHANA' | 'NIGERIA'
 
-const DEFAULT_COUNTRY: CountryCode = 'NIGERIA'
+const DEFAULT_COUNTRY: CountryCode = 'GHANA'
 
 const SOURCE_CONFIG: Array<{ channel: string, country: CountryCode }> = [
   { channel: 'sportybet_gh', country: 'GHANA' },
-  { channel: 'sportybet_kenya', country: 'KENYA' },
-  { channel: 'SportybetOfficialChannel', country: 'NIGERIA' },
+  { channel: 'SportybetOfficialChannel', country: 'GHANA' },
   { channel: 'bookingcodes', country: 'NIGERIA' },
   { channel: 'sportybet_nigeria_codes', country: 'NIGERIA' },
+  { channel: 'sportybet_codes_free', country: 'NIGERIA' },
 ]
 const CHANNELS = SOURCE_CONFIG.map((source) => source.channel)
 // Channels whose unlabeled codes are not assumed to be SportyBet
