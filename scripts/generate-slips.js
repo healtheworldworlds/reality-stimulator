@@ -23,10 +23,11 @@ const OUT_FILE = 'generated_codes.txt';
   const page = await context.newPage();
 
   try {
-    await page.goto('https://www.sportybet.com/gh/m/sport/football/today', { waitUntil: 'domcontentloaded', timeout: 40000 });
+    // Navigate to full upcoming football list (not restricted to late-night leftovers)
+    await page.goto('https://www.sportybet.com/gh/m/sport/football', { waitUntil: 'domcontentloaded', timeout: 40000 });
     await page.waitForTimeout(4000);
 
-    // Switch to O/U tab
+    // Switch to O/U tab if Over market selected
     if (MARKET.startsWith('OVER')) {
       const ouTab = page.locator('span, div, .m-market-tab').filter({ hasText: /^O\/U$/i }).first();
       if (await ouTab.isVisible({ timeout: 6000 })) {
@@ -39,7 +40,7 @@ const OUT_FILE = 'generated_codes.txt';
       let picked = 0;
       let scrollAttempts = 0;
 
-      while (picked < LEGS && scrollAttempts < 15) {
+      while (picked < LEGS && scrollAttempts < 25) {
         const buttons = await page.locator('.m-outcome, .m-table-cell, .m-odds-btn').all();
 
         for (const btn of buttons) {
@@ -51,14 +52,14 @@ const OUT_FILE = 'generated_codes.txt';
               if (!isSelected && text && text.trim().length > 0) {
                 await btn.click({ timeout: 1500 });
                 picked++;
-                await page.waitForTimeout(600);
+                await page.waitForTimeout(500);
               }
             }
           } catch (_) {}
         }
 
         if (picked < LEGS) {
-          await page.mouse.wheel(0, 1200);
+          await page.mouse.wheel(0, 1500);
           await page.waitForTimeout(1000);
           scrollAttempts++;
         }
@@ -68,14 +69,14 @@ const OUT_FILE = 'generated_codes.txt';
 
       if (picked >= LEGS) {
         // Direct navigation to mobile betslip URL
-        await page.goto('https://www.sportybet.com/gh/m/betslip', { waitUntil: 'domcontentloaded', timeout: 15000 });
-        await page.waitForTimeout(2500);
+        await page.goto('https://www.sportybet.com/gh/m/betslip', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForTimeout(3000);
 
         // Click Book Bet / Share Code button
         const bookBtn = page.locator('button, .m-btn, .m-betslip-book').filter({ hasText: /book/i }).first();
-        if (await bookBtn.isVisible({ timeout: 7000 })) {
+        if (await bookBtn.isVisible({ timeout: 8000 })) {
           await bookBtn.click();
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(3500);
 
           // Read the booking code from the modal
           const codeEl = page.locator('.m-booking-code, .m-code, [class*="code"], .share-code').first();
@@ -86,7 +87,7 @@ const OUT_FILE = 'generated_codes.txt';
           console.log(`>>> BOOKED: ${entry.trim()}`);
           fs.appendFileSync(OUT_FILE, entry);
 
-          // Clear betslip for the next slip
+          // Reset the betslip for the next slip
           const removeAll = page.locator('button, span, .m-icon-delete').filter({ hasText: /remove all|clear/i }).first();
           if (await removeAll.isVisible({ timeout: 3000 })) {
             await removeAll.click();
@@ -94,9 +95,9 @@ const OUT_FILE = 'generated_codes.txt';
           }
         }
 
-        // Return to match list for the next slip
+        // Return to match list for subsequent slips
         if (s < SLIPS) {
-          await page.goto('https://www.sportybet.com/gh/m/sport/football/today', { waitUntil: 'domcontentloaded', timeout: 25000 });
+          await page.goto('https://www.sportybet.com/gh/m/sport/football', { waitUntil: 'domcontentloaded', timeout: 25000 });
           await page.waitForTimeout(3000);
           if (MARKET.startsWith('OVER')) {
             const ouTab = page.locator('span, div, .m-market-tab').filter({ hasText: /^O\/U$/i }).first();
