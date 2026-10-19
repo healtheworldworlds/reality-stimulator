@@ -27,6 +27,15 @@ const BOOKIES: Record<Bookie, { label: string, loadLabel: string, url: string }>
   betway: { label: 'Betway', loadLabel: 'Load on Betway', url: 'https://www.betway.com.gh/' },
 }
 
+const COUNTRY_NAMES = { GH: 'GHANA', NG: 'NIGERIA', KE: 'KENYA' } as const
+
+function countryLabel(country: LiveCode['countryCode'], bookie: Bookie) {
+  if (country === 'GH' || country === 'NG' || country === 'KE') {
+    return `${COUNTRY_NAMES[country]} · ${bookie === 'betway' ? 'BETWAY' : 'SPORTYBET'}`
+  }
+  return 'GLOBAL · MULTI-BOOKIE'
+}
+
 function relativeTime(iso: string, now: number) {
   const minutes = Math.max(0, Math.floor((now - Date.parse(iso)) / 60_000))
   if (minutes < 1) return 'just now'
@@ -141,12 +150,14 @@ export function LiveCodesHub() {
           <li className="live-code" key={item.id}>
             <div className="live-code__main">
               <strong className="live-code__code">{item.code}</strong>
-              <div className="live-code__tags">
-                {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}
-                <span className="live-code__time">{relativeTime(item.time, now)}</span>
-                <span className="live-code__country">{item.countryCode ?? 'INTL'} · {bookie === 'betway' ? 'BETWAY' : 'SPORTYBET'}</span>
-                <span className="live-code__channel">@{item.channel}</span>
-              </div>
+              <span className={`live-code__country live-code__country--${(item.countryCode ?? 'INTL').toLowerCase()}`}>
+                {countryLabel(item.countryCode, bookie)}
+              </span>
+            </div>
+            <div className="live-code__tags">
+              {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}
+              <span className="live-code__time">{relativeTime(item.time, now)}</span>
+              <span className="live-code__channel">@{item.channel}</span>
             </div>
             <div className="live-code__actions">
               <button className="quiet-button" type="button" onClick={() => void copyCode(item)}>
