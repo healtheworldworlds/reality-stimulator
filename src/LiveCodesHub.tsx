@@ -22,9 +22,9 @@ type FeedPayload = {
   warnings?: string[]
 }
 
-const BOOKIES: Record<Bookie, { label: string, loadLabel: string, url: string }> = {
-  sportybet: { label: 'SportyBet GH', loadLabel: 'Load on SportyBet', url: 'https://www.sportybet.com/gh/' },
-  betway: { label: 'Betway', loadLabel: 'Load on Betway', url: 'https://www.betway.com.gh/' },
+const BOOKIES: Record<Bookie, { label: string }> = {
+  sportybet: { label: 'SportyBet GH' },
+  betway: { label: 'Betway' },
 }
 
 const COUNTRY_NAMES = { GH: 'GHANA', NG: 'NIGERIA', KE: 'KENYA' } as const
@@ -162,11 +162,6 @@ export function LiveCodesHub() {
                 {copiedId === item.id ? '✓ Code Copied!' : 'Copy Code'}
               </button>
               <button className="quiet-button" type="button" onClick={() => convertCode(item)}>Convert Code ⇄</button>
-              {item.countryCode === 'GH' ? (
-                <a className="live-code__load" href={meta.url} target="_blank" rel="noopener noreferrer">Load Slip ↗</a>
-              ) : (
-                <a className="live-code__load" href="https://convertbetcodes.com/" target="_blank" rel="noopener noreferrer">Convert to GH ⇄</a>
-              )}
             </div>
           </li>
         ))}
