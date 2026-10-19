@@ -47,7 +47,6 @@ const OUT_FILE = 'generated_codes.txt';
           try {
             if (await btn.isVisible()) {
               const text = await btn.innerText().catch(() => '');
-              // Avoid buttons that are already selected or inactive
               const isSelected = await btn.evaluate(el => el.classList.contains('m-outcome--selected') || el.classList.contains('active')).catch(() => false);
               if (!isSelected && text && text.trim().length > 0) {
                 await btn.click({ timeout: 1500 });
@@ -68,31 +67,43 @@ const OUT_FILE = 'generated_codes.txt';
       console.log(`[Slip ${s}/${SLIPS}] Total picks gathered: ${picked}/${LEGS}`);
 
       if (picked >= LEGS) {
-        // Open Betslip
-        const betslip = page.locator('.m-betslip-btn, .m-bottom-nav-item, [class*="betslip"]').first();
-        await betslip.click();
-        await page.waitForTimeout(2000);
+        // Direct navigation to mobile betslip URL
+        await page.goto('https://www.sportybet.com/gh/m/betslip', { waitUntil: 'domcontentloaded', timeout: 15000 });
+        await page.waitForTimeout(2500);
 
-        // Click Book Bet / Share Code
-        const bookBtn = page.locator('button, .m-btn').filter({ hasText: /book/i }).first();
-        if (await bookBtn.isVisible({ timeout: 6000 })) {
+        // Click Book Bet / Share Code button
+        const bookBtn = page.locator('button, .m-btn, .m-betslip-book').filter({ hasText: /book/i }).first();
+        if (await bookBtn.isVisible({ timeout: 7000 })) {
           await bookBtn.click();
-          await page.waitForTimeout(2500);
+          await page.waitForTimeout(3000);
 
-          // Extract code
-          const codeEl = page.locator('.m-booking-code, .m-code, [class*="code"]').first();
-          const codeText = await codeEl.textContent({ timeout: 5000 }).catch(() => null);
+          // Read the booking code from the modal
+          const codeEl = page.locator('.m-booking-code, .m-code, [class*="code"], .share-code').first();
+          const codeText = await codeEl.textContent({ timeout: 6000 }).catch(() => null);
           const cleanCode = codeText ? codeText.trim().replace(/[^A-Z0-9]/gi, '') : 'GENERATED';
 
           const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Market: ${MARKET} | Legs: ${LEGS}\n`;
           console.log(`>>> BOOKED: ${entry.trim()}`);
           fs.appendFileSync(OUT_FILE, entry);
 
-          // Remove all selections to reset the betslip cleanly
-          const removeAll = page.locator('button, span').filter({ hasText: /remove all|clear/i }).first();
+          // Clear betslip for the next slip
+          const removeAll = page.locator('button, span, .m-icon-delete').filter({ hasText: /remove all|clear/i }).first();
           if (await removeAll.isVisible({ timeout: 3000 })) {
             await removeAll.click();
             await page.waitForTimeout(1000);
+          }
+        }
+
+        // Return to match list for the next slip
+        if (s < SLIPS) {
+          await page.goto('https://www.sportybet.com/gh/m/sport/football/today', { waitUntil: 'domcontentloaded', timeout: 25000 });
+          await page.waitForTimeout(3000);
+          if (MARKET.startsWith('OVER')) {
+            const ouTab = page.locator('span, div, .m-market-tab').filter({ hasText: /^O\/U$/i }).first();
+            if (await ouTab.isVisible({ timeout: 5000 })) {
+              await ouTab.click();
+              await page.waitForTimeout(2000);
+            }
           }
         }
       }
