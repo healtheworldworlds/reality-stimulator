@@ -653,69 +653,6 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
 
       <div className="main-grid">
         <div className="fixture-column">
-          <section className="custom-match-section" aria-labelledby="custom-match-heading">
-            <div className="section-heading custom-match-heading">
-              <div>
-                <p className="eyebrow">02 / Add to match pool</p>
-                <h2 id="custom-match-heading">Custom match</h2>
-              </div>
-              <button className="quiet-button" type="button" aria-expanded={customFormOpen} onClick={() => setCustomFormOpen((open) => !open)}>
-                <Plus size={14} /> {customFormOpen ? 'Hide form' : 'Add custom match'}
-              </button>
-            </div>
-            {customFormOpen && (
-              <form className="custom-match-form" onSubmit={addCustomFixture}>
-                <div className="custom-match-fields">
-                  <label className="form-field">
-                    <span>Home team</span>
-                    <input type="text" autoComplete="off" maxLength={MAX_CUSTOM_TEAM_NAME_LENGTH} value={customDraft.home} onChange={(event) => updateCustomField('home', event.target.value)} placeholder="e.g. Northbridge FC" required />
-                  </label>
-                  <label className="form-field">
-                    <span>Away team</span>
-                    <input type="text" autoComplete="off" maxLength={MAX_CUSTOM_TEAM_NAME_LENGTH} value={customDraft.away} onChange={(event) => updateCustomField('away', event.target.value)} placeholder="e.g. Riverside United" required />
-                  </label>
-                  <label className="form-field">
-                    <span>Kickoff</span>
-                    <input type="text" autoComplete="off" maxLength={MAX_CUSTOM_KICKOFF_LENGTH} value={customDraft.kickoff} onChange={(event) => updateCustomField('kickoff', event.target.value)} placeholder="Tomorrow, 15:00" />
-                  </label>
-                  <label className="form-field">
-                    <span>Expected home goals (λ)</span>
-                    <input type="number" inputMode="decimal" min="0" max="2.5" step="0.01" value={customDraft.lambda} onChange={(event) => updateCustomField('lambda', event.target.value)} required />
-                  </label>
-                  <label className="form-field">
-                    <span>Expected away goals (μ)</span>
-                    <input type="number" inputMode="decimal" min="0" max="2.5" step="0.01" value={customDraft.mu} onChange={(event) => updateCustomField('mu', event.target.value)} required />
-                  </label>
-                  <label className="form-field">
-                    <span>Goal-rate preset</span>
-                    <select value={customRatePreset} onChange={(event) => applyCustomRatePreset(event.target.value)}>
-                      <option value="balanced">Balanced · 1.65 / 1.15</option>
-                      <option value="home-favourite">Home favourite · 2.00 / 0.80</option>
-                      <option value="even-match">Even match · 1.35 / 1.35</option>
-                      <option value="custom">Manual rates</option>
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    <span>Bookmaker odds · Home</span>
-                    <input type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={customDraft.homeOdds} onChange={(event) => updateCustomField('homeOdds', event.target.value)} placeholder="2.10" required />
-                  </label>
-                  <label className="form-field">
-                    <span>Bookmaker odds · Draw</span>
-                    <input type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={customDraft.drawOdds} onChange={(event) => updateCustomField('drawOdds', event.target.value)} placeholder="3.40" required />
-                  </label>
-                  <label className="form-field">
-                    <span>Bookmaker odds · Away</span>
-                    <input type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={customDraft.awayOdds} onChange={(event) => updateCustomField('awayOdds', event.target.value)} placeholder="3.60" required />
-                  </label>
-                </div>
-                <div className="custom-match-footer">
-                  <button className="run-button custom-match-submit" type="submit"><Plus size={15} /> Add match to board</button>
-                  <p>Rates capped at 2.50 to keep Dixon–Coles corrections valid across the full ρ range. Other market prices use illustrative defaults.</p>
-                </div>
-              </form>
-            )}
-          </section>
-
           <section className={`fixture-section${fixtureBoardOpen ? ' is-open' : ''}`} id="fixtures" aria-labelledby="fixture-heading">
           <div className="section-heading section-heading--fixture">
             <div>
@@ -909,6 +846,68 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
           <p>Each round draws one independent scoreline per selected fixture from its corrected Dixon–Coles matrix. The second-half market allocates each goal to a half at the calibrated share; a tie is not a second-half win. The fixture lineup remains fixed between rounds so outcomes can be regenerated and copied.</p>
           <p>The automated generator calibrates model odds inside the requested range and uses scheduled API-Football fixtures when available. Its offline registry fallback creates illustrative, unscheduled matchups. Kickoff times and availability depend on the selected UTC window. All model prices in this prototype are estimates, not bookmaker odds.</p>
         </div>
+      </section>
+      <section className="custom-match-section" aria-labelledby="custom-match-heading">
+        <div className="section-heading custom-match-heading">
+          <div>
+            <p className="eyebrow">Advanced utility / Add to match pool</p>
+            <h2 id="custom-match-heading">Custom match</h2>
+          </div>
+          <button className="quiet-button" type="button" aria-expanded={customFormOpen} onClick={() => setCustomFormOpen((open) => !open)}>
+            <Plus size={14} /> {customFormOpen ? 'Hide form' : 'Add custom match'}
+          </button>
+        </div>
+        {customFormOpen && (
+          <form className="custom-match-form" onSubmit={addCustomFixture}>
+            <div className="custom-match-fields">
+              <label className="form-field">
+                <span>Home team</span>
+                <input type="text" autoComplete="off" maxLength={MAX_CUSTOM_TEAM_NAME_LENGTH} value={customDraft.home} onChange={(event) => updateCustomField('home', event.target.value)} placeholder="e.g. Northbridge FC" required />
+              </label>
+              <label className="form-field">
+                <span>Away team</span>
+                <input type="text" autoComplete="off" maxLength={MAX_CUSTOM_TEAM_NAME_LENGTH} value={customDraft.away} onChange={(event) => updateCustomField('away', event.target.value)} placeholder="e.g. Riverside United" required />
+              </label>
+              <label className="form-field">
+                <span>Kickoff</span>
+                <input type="text" autoComplete="off" maxLength={MAX_CUSTOM_KICKOFF_LENGTH} value={customDraft.kickoff} onChange={(event) => updateCustomField('kickoff', event.target.value)} placeholder="Tomorrow, 15:00" />
+              </label>
+              <label className="form-field">
+                <span>Expected home goals (λ)</span>
+                <input type="number" inputMode="decimal" min="0" max="2.5" step="0.01" value={customDraft.lambda} onChange={(event) => updateCustomField('lambda', event.target.value)} required />
+              </label>
+              <label className="form-field">
+                <span>Expected away goals (μ)</span>
+                <input type="number" inputMode="decimal" min="0" max="2.5" step="0.01" value={customDraft.mu} onChange={(event) => updateCustomField('mu', event.target.value)} required />
+              </label>
+              <label className="form-field">
+                <span>Goal-rate preset</span>
+                <select value={customRatePreset} onChange={(event) => applyCustomRatePreset(event.target.value)}>
+                  <option value="balanced">Balanced · 1.65 / 1.15</option>
+                  <option value="home-favourite">Home favourite · 2.00 / 0.80</option>
+                  <option value="even-match">Even match · 1.35 / 1.35</option>
+                  <option value="custom">Manual rates</option>
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Bookmaker odds · Home</span>
+                <input type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={customDraft.homeOdds} onChange={(event) => updateCustomField('homeOdds', event.target.value)} placeholder="2.10" required />
+              </label>
+              <label className="form-field">
+                <span>Bookmaker odds · Draw</span>
+                <input type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={customDraft.drawOdds} onChange={(event) => updateCustomField('drawOdds', event.target.value)} placeholder="3.40" required />
+              </label>
+              <label className="form-field">
+                <span>Bookmaker odds · Away</span>
+                <input type="number" inputMode="decimal" min="1" max="1000" step="0.01" value={customDraft.awayOdds} onChange={(event) => updateCustomField('awayOdds', event.target.value)} placeholder="3.60" required />
+              </label>
+            </div>
+            <div className="custom-match-footer">
+              <button className="run-button custom-match-submit" type="submit"><Plus size={15} /> Add match to board</button>
+              <p>Rates capped at 2.50 to keep Dixon–Coles corrections valid across the full ρ range. Other market prices use illustrative defaults.</p>
+            </div>
+          </form>
+        )}
       </section>
       <footer className="page-footer"><span>Reality Simulator</span><span>Research prototype · Model outputs are estimates</span></footer>
       <div className="sr-only" aria-live="polite">{status}</div>
