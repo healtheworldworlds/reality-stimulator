@@ -44,6 +44,8 @@ export function LiveCodesHub() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [toast, setToast] = useState('')
+  const [converted, setConverted] = useState<Record<string, { code: string; country: 'GHANA' | 'NIGERIA' }>>({})
+  const [convertingId, setConvertingId] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   const refresh = useCallback(async () => {
@@ -99,9 +101,28 @@ export function LiveCodesHub() {
     }
   }
 
-  function convertCode(item: LiveCode) {
+  async function convertCode(item: LiveCode) {
+    const code = converted[item.id]?.code ?? item.code
+    const country = converted[item.id]?.country ?? item.countryCode
+    if (country === 'NIGERIA') {
+      setConvertingId(item.id)
+      try {
+        const response = await fetch(`/api/convert-code?booking_code=${encodeURIComponent(code)}&from=sportybet:ng&to=sportybet:gh`)
+        const payload = await response.json().catch(() => null) as { success?: boolean; convertedCode?: string } | null
+        if (!payload?.success || !payload.convertedCode) throw new Error('Conversion failed')
+        const convertedCode = payload.convertedCode
+        setConverted((current) => ({ ...current, [item.id]: { code: convertedCode, country: 'GHANA' } }))
+        await navigator.clipboard.writeText(convertedCode).catch(() => undefined)
+        setToast('Converted to Ghana code & copied!')
+      } catch {
+        window.open('https://convertbetcodes.com/', '_blank', 'noopener,noreferrer')
+      } finally {
+        setConvertingId(null)
+      }
+      return
+    }
     window.open('https://convertbetcodes.com/', '_blank', 'noopener,noreferrer')
-    void navigator.clipboard.writeText(item.code).then(
+    void navigator.clipboard.writeText(code).then(
       () => setToast('Code copied! Opening universal converter...'),
       () => setError('Could not copy the code. Select it manually instead.'),
     )
@@ -140,9 +161,9 @@ export function LiveCodesHub() {
         {items.map((item) => (
           <li className="live-code" key={item.id}>
             <div className="live-code__main">
-              <strong className="live-code__code">{item.code}</strong>
+              <strong className="live-code__code">              {converted[item.id]?.code ?? item.code}</strong>
               <span className="live-code__country">
-                {item.countryCode ?? 'GHANA'}
+                              {converted[item.id]?.country ?? item.countryCode ?? 'GHANA'}
               </span>
             </div>
             <div className="live-code__tags">
@@ -154,7 +175,9 @@ export function LiveCodesHub() {
               <button className="quiet-button" type="button" onClick={() => void copyCode(item)}>
                 {copiedId === item.id ? '✓ Code Copied!' : 'Copy Code'}
               </button>
-              <button className="quiet-button" type="button" onClick={() => convertCode(item)}>Convert Code ⇄</button>
+                            <button className="quiet-button" type="button" disabled={convertingId === item.id} onClick={() => void convertCode(item)}>
+                              {convertingId === item.id ? 'Converting...' : 'Convert Code ⇄'}
+                            </button>
             </div>
           </li>
         ))}
