@@ -23,18 +23,14 @@ type CountryCode = 'GHANA' | 'NIGERIA' | 'KENYA' | 'TANZANIA' | 'ZAMBIA' | 'SOUT
 const DEFAULT_COUNTRY: CountryCode = 'NIGERIA'
 
 const SOURCE_CONFIG: Array<{ channel: string, country: CountryCode }> = [
-  { channel: 'sportybet_ghana_codes', country: 'GHANA' },
+  { channel: 'SportyBetGH', country: 'GHANA' },
+  { channel: 'sportybet_gh', country: 'GHANA' },
+  { channel: 'ghana_betting_codes', country: 'GHANA' },
+  { channel: 'SportyBetKE', country: 'KENYA' },
+  { channel: 'sportybet_kenya', country: 'KENYA' },
   { channel: 'SportybetOfficialChannel', country: 'NIGERIA' },
   { channel: 'bookingcodes', country: 'NIGERIA' },
   { channel: 'sportybet_nigeria_codes', country: 'NIGERIA' },
-  { channel: 'sportybet_codes_free', country: 'NIGERIA' },
-  { channel: 'betcodes_hub', country: 'NIGERIA' },
-  { channel: 'sportybetkenya_official', country: 'KENYA' },
-  { channel: 'sportybet_kenya_slips', country: 'KENYA' },
-  { channel: 'sportybet_tanzania', country: 'TANZANIA' },
-  { channel: 'sportybet_tz_codes', country: 'TANZANIA' },
-  { channel: 'sportybet_zambia', country: 'ZAMBIA' },
-  { channel: 'sportybet_southafrica', country: 'SOUTH AFRICA' },
 ]
 const CHANNELS = SOURCE_CONFIG.map((source) => source.channel)
 // Channels whose unlabeled codes are not assumed to be SportyBet
