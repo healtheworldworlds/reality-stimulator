@@ -122,20 +122,13 @@ function currentUtcClockTime() {
   return new Date().toISOString().slice(11, 16)
 }
 
-function selectLiveFixtures(fixtures: LiveFixture[], count: number, startMinute: number) {
+function selectLiveFixtures(fixtures: LiveFixture[], count: number) {
   const shuffled = [...fixtures]
-  for (let index = 0; index < Math.min(count, shuffled.length); index += 1) {
-    const swapIndex = index + Math.floor(Math.random() * (shuffled.length - index))
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1))
     ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
   }
-  return shuffled.slice(0, count).sort((left, right) => {
-    const minuteOfDay = (time: string) => {
-      const [hours, minutes] = time.split(':').map(Number)
-      return hours * 60 + minutes
-    }
-    return (minuteOfDay(left.kickoff) - startMinute + 1440) % 1440 -
-      (minuteOfDay(right.kickoff) - startMinute + 1440) % 1440
-  })
+  return shuffled.slice(0, count)
 }
 
 const fixtures: Fixture[] = [
@@ -429,7 +422,7 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
     try {
       const liveResult = await fetchTodaysFixtures(start, end)
       const liveMatchups = liveResult.status === 'available'
-        ? selectLiveFixtures(liveResult.fixtures, count, start)
+        ? selectLiveFixtures(liveResult.fixtures, count)
         : []
       const useLiveFixtures = liveMatchups.length > 0
       const fallbackKickoffTimes = useLiveFixtures ? [] : generateKickoffTimes(count, start, end)
