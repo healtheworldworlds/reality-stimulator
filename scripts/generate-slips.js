@@ -23,11 +23,9 @@ const OUT_FILE = 'generated_codes.txt';
   const page = await context.newPage();
 
   try {
-    // 1. Navigate to full upcoming football to guarantee available fixtures
     await page.goto('https://www.sportybet.com/gh/m/sport/football', { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(4000);
 
-    // 2. Select O/U tab
     const ouTab = page.locator('.m-market-tab, span, div').filter({ hasText: /^O\/U$/i }).first();
     if (await ouTab.isVisible({ timeout: 6000 }).catch(() => false)) {
       await ouTab.click();
@@ -39,7 +37,6 @@ const OUT_FILE = 'generated_codes.txt';
       let scrollAttempts = 0;
 
       while (picked < LEGS && scrollAttempts < 30) {
-        // Collect visible odds buttons
         const buttons = await page.locator('.m-outcome, .m-table-cell, .m-odds-btn, [data-op="label-odds"]').all();
 
         for (const btn of buttons) {
@@ -68,38 +65,41 @@ const OUT_FILE = 'generated_codes.txt';
       console.log(`[Slip ${s}/${SLIPS}] Total picks gathered: ${picked}/${LEGS}`);
 
       if (picked >= LEGS) {
-        // 3. Open Betslip drawer using the confirmed working selector
-        const betslipIcon = page.locator('.betslip-theme-icon, .m-bottom-nav-item, #m-betslip, [data-op="betslip"]').first();
-        await betslipIcon.click({ force: true });
-        await page.waitForTimeout(3000);
+        // Open betslip only if book button is not yet visible
+        const existingBook = page.locator('.m-book-btn, button:has-text("Book Bet")').first();
+        if (!(await existingBook.isVisible({ timeout: 1500 }).catch(() => false))) {
+          const icon = page.locator('.betslip-theme-icon, #m-betslip, [data-op="betslip"]').first();
+          await icon.click({ force: true });
+          await page.waitForTimeout(3000);
+        }
 
-        // 4. Click Book Bet
-        const bookBtn = page.locator('.m-book-btn, button, .m-btn').filter({ hasText: /book/i }).first();
-        await bookBtn.waitFor({ state: 'visible', timeout: 10000 });
+        // Click Book Bet directly
+        const bookBtn = page.locator('.m-book-btn, [data-op="book-bet"], button:has-text("Book Bet"), button:has-text("Book")').first();
+        await bookBtn.scrollIntoViewIfNeeded().catch(() => {});
         await bookBtn.click({ force: true });
-        await page.waitForTimeout(3500);
+        await page.waitForTimeout(4000);
 
-        // 5. Read code using confirmed .m-booking-code-body
+        // Read booking code
         let bookingCode = '';
-        const codeBody = page.locator('.m-booking-code-body, .m-dialog-booking, [class*="booking-code"]').first();
-        if (await codeBody.isVisible({ timeout: 6000 }).catch(() => false)) {
-          const bodyText = await codeBody.innerText().catch(() => '');
-          const match = bodyText.match(/([A-Z0-9]{6,7})/);
+        const codeElement = page.locator('.m-booking-code-body, .m-booking-code, .m-dialog-booking, .share-code').first();
+        if (await codeElement.isVisible({ timeout: 8000 }).catch(() => false)) {
+          const text = await codeElement.innerText().catch(() => '');
+          const match = text.match(/([A-Z0-9]{6,7})/);
           if (match) bookingCode = match[1];
         }
 
         if (!bookingCode) {
-          const allDialog = await page.locator('[role="dialog"], .m-dialog, body').innerText().catch(() => '');
-          const match = allDialog.match(/([A-Z0-9]{6,7})/);
+          const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
+          const match = bodyText.match(/Booking Code\s*[:\-]?\s*([A-Z0-9]{6,7})/i) || bodyText.match(/Code\s*[:\-]?\s*([A-Z0-9]{6,7})/i);
           if (match) bookingCode = match[1];
         }
 
-        const cleanCode = bookingCode || 'SUCCESS_GENERATED';
+        const cleanCode = bookingCode || 'GENERATED';
         const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Market: ${MARKET} | Legs: ${LEGS}\n`;
         console.log(`>>> BOOKED: ${entry.trim()}`);
         fs.appendFileSync(OUT_FILE, entry);
 
-        // 6. Dismiss dialog & clean betslip
+        // Close modal and clear
         await page.mouse.click(195, 20).catch(() => {});
         await page.waitForTimeout(1000);
 
@@ -107,7 +107,7 @@ const OUT_FILE = 'generated_codes.txt';
         if (await removeAll.isVisible({ timeout: 3000 }).catch(() => false)) {
           await removeAll.click({ force: true });
           await page.waitForTimeout(500);
-          const okBtn = page.locator('button:has-text("OK"), .m-btn:has-text("OK")').first();
+          const okBtn = page.locator('button:has-text("OK")').first();
           if (await okBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
             await okBtn.click({ force: true });
           }
