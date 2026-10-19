@@ -27,7 +27,7 @@ const OUT_FILE = 'generated_codes.txt';
     await page.waitForTimeout(4000);
 
     if (MARKET.startsWith('OVER')) {
-      const ouTab = page.locator('span, div, .m-market-tab').filter({ hasText: /^O\/U$/i }).first();
+      const ouTab = page.locator('.m-market-tab, span, div').filter({ hasText: /^O\/U$/i }).first();
       if (await ouTab.isVisible({ timeout: 6000 })) {
         await ouTab.click();
         await page.waitForTimeout(2500);
@@ -66,26 +66,23 @@ const OUT_FILE = 'generated_codes.txt';
       console.log(`[Slip ${s}/${SLIPS}] Total picks gathered: ${picked}/${LEGS}`);
 
       if (picked >= LEGS) {
-        // Target the floating bottom bar element specifically
-        const betslipTrigger = page.locator('.m-bottom-nav, .m-footer, .m-layout-footer, body')
-          .locator('text=/betslip/i, .m-icon-betslip, [data-op="betslip"]')
-          .first();
-
-        if (await betslipTrigger.isVisible({ timeout: 5000 })) {
-          await betslipTrigger.click();
+        // Clean valid selector for the bottom bar floating betslip
+        const betslip = page.locator('#m-betslip, .m-betslip, [data-op="betslip"], .m-bottom-nav-item:has-text("Betslip")').first();
+        if (await betslip.isVisible({ timeout: 4000 })) {
+          await betslip.click();
         } else {
-          // Fallback click on the bottom right floating badge
-          await page.mouse.click(340, 800);
+          // Bottom center/right tap fallback
+          await page.mouse.click(300, 800);
         }
         await page.waitForTimeout(3000);
 
-        // Click Book Bet inside the opened modal
+        // Click Book Bet inside betslip drawer
         const bookBtn = page.locator('button, .m-btn, .m-betslip-book').filter({ hasText: /book/i }).first();
         if (await bookBtn.isVisible({ timeout: 8000 })) {
           await bookBtn.click();
           await page.waitForTimeout(3500);
 
-          const codeEl = page.locator('.m-booking-code, .m-code, [class*="code"], .share-code').first();
+          const codeEl = page.locator('.m-booking-code, .m-code, .share-code, [class*="code"]').first();
           const codeText = await codeEl.textContent({ timeout: 6000 }).catch(() => null);
           const cleanCode = codeText ? codeText.trim().replace(/[^A-Z0-9]/gi, '') : 'GENERATED';
 
