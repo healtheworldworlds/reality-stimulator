@@ -23,10 +23,7 @@ type CountryCode = 'GHANA' | 'NIGERIA' | 'KENYA' | 'TANZANIA' | 'ZAMBIA' | 'SOUT
 const DEFAULT_COUNTRY: CountryCode = 'NIGERIA'
 
 const SOURCE_CONFIG: Array<{ channel: string, country: CountryCode }> = [
-  { channel: 'SportyBetGH', country: 'GHANA' },
   { channel: 'sportybet_gh', country: 'GHANA' },
-  { channel: 'ghana_betting_codes', country: 'GHANA' },
-  { channel: 'SportyBetKE', country: 'KENYA' },
   { channel: 'sportybet_kenya', country: 'KENYA' },
   { channel: 'SportybetOfficialChannel', country: 'NIGERIA' },
   { channel: 'bookingcodes', country: 'NIGERIA' },
