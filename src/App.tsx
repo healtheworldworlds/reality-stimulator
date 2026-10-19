@@ -339,9 +339,6 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
   const [roundNumber, setRoundNumber] = useState(0)
   const [roundResults, setRoundResults] = useState<Map<string, RoundResult>>(() => new Map())
   const [status, setStatus] = useState('')
-  const [booking, setBooking] = useState(false)
-  const [bookingCode, setBookingCode] = useState('')
-  const [bookingFallback, setBookingFallback] = useState(false)
   const nextFixtureIdRef = useRef(1)
 
   const preparedFixtures = useMemo(
@@ -358,59 +355,6 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
       }),
     [fixturePool, generatedFixtures, halfLifeDays, rho],
   )
-
-  function buildSlipText() {
-    const lines = roundFixtureIds.flatMap((fixtureId, index) => {
-      const fixture = preparedFixtures.find((item) => item.id === fixtureId)
-      if (!fixture) return []
-      return [`${index + 1}. ${fixture.home} vs ${fixture.away}\n   Market: ${automatedMarketLabels[roundMarket]}\n   Kickoff: ${formatKickoff(fixture.kickoff, fixture.kickoffDate)}`]
-    })
-    return `Round ${roundNumber || 1} slip\n\n${lines.join('\n\n')}`
-  }
-
-  async function copySlip() {
-    try {
-      await navigator.clipboard.writeText(buildSlipText())
-      setStatus('Slip copied. Paste it into SportyBet Ghana to add each selection.')
-    } catch {
-      setStatus('Could not copy the slip. Copy the match list manually instead.')
-    }
-  }
-
-  async function bookSlip() {
-    const matches = roundFixtureIds.flatMap((fixtureId) => {
-      const fixture = preparedFixtures.find((item) => item.id === fixtureId)
-      return fixture ? [{ homeTeam: fixture.home, awayTeam: fixture.away, kickoff: fixture.kickoff, marketPick: 'over_1_5' }] : []
-    })
-    setBooking(true)
-    setBookingFallback(false)
-    setBookingCode('')
-    try {
-      const response = await fetch('/api/book-custom-slip', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matches }),
-      })
-      const payload = await response.json().catch(() => null) as { success?: boolean; bookingCode?: string } | null
-      if (!payload?.success || !payload.bookingCode) throw new Error('Failed to book')
-      setBookingCode(payload.bookingCode)
-    } catch {
-      setBookingFallback(true)
-      await navigator.clipboard.writeText(buildSlipText()).catch(() => undefined)
-      setStatus('Could not generate a booking code. Match list copied instead.')
-    } finally {
-      setBooking(false)
-    }
-  }
-
-  async function copyBookingCode() {
-    try {
-      await navigator.clipboard.writeText(bookingCode)
-      setStatus('Booking code copied.')
-    } catch {
-      setStatus('Could not copy the code. Select it manually instead.')
-    }
-  }
 
   function toggleRoundFixture(fixtureId: string) {
     const fixture = preparedFixtures.find((item) => item.id === fixtureId)
@@ -822,21 +766,8 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
           <section className="slip-section" aria-labelledby="slip-heading">
             <div className="side-heading side-heading--slip">
                 <div><p className="eyebrow">06 / Round generator</p><h2 id="slip-heading">Round outcomes <span className="count-badge">{roundFixtureIds.length}</span></h2></div>
-                {roundFixtureIds.length > 0 && <div className="slip-actions"><button className="quiet-button" type="button" disabled={booking} onClick={() => void bookSlip()}>{booking ? 'Booking on SportyBet...' : 'Book Slip on SportyBet GH'}</button><button className="quiet-button delete-slips-button" type="button" onClick={() => { setRoundFixtureIds([]); setRoundResults(new Map()); setRoundNumber(0); setBookingCode(''); setBookingFallback(false) }}>Delete slips</button></div>}
+                {roundFixtureIds.length > 0 && <button className="quiet-button delete-slips-button" type="button" onClick={() => { setRoundFixtureIds([]); setRoundResults(new Map()); setRoundNumber(0) }}>Delete slips</button>}
             </div>
-            {bookingCode && (
-              <div className="booking-banner" role="status">
-                <strong>SportyBet GH Code: {bookingCode}</strong>
-                <button className="quiet-button" type="button" onClick={() => void copyBookingCode()}>Copy Code</button>
-                <a className="quiet-button" href="https://www.sportybet.com/gh/" target="_blank" rel="noopener noreferrer">Open SportyBet GH</a>
-              </div>
-            )}
-            {bookingFallback && (
-              <div className="booking-banner is-fallback" role="alert">
-                <span>Couldn't generate a code (API credits may be used up). Your match list was copied to the clipboard.</span>
-                <a className="quiet-button" href="https://www.sportybet.com/gh/" target="_blank" rel="noopener noreferrer">Open SportyBet GH</a>
-              </div>
-            )}
               <section className="round-generator" aria-label="Round outcome generator">
                 <div className="round-generator__heading">
                   <div>
@@ -893,12 +824,6 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
                         </article>
                       )
                     })}
-                  </div>
-                )}
-                {roundFixtureIds.length > 0 && (
-                  <div className="round-generator__actions">
-                    <button className="quiet-button" type="button" onClick={() => void copySlip()}>Copy Slip for SportyBet</button>
-                    <a className="quiet-button" href="https://www.sportybet.com/gh/" target="_blank" rel="noopener noreferrer">Book on SportyBet Ghana</a>
                   </div>
                 )}
               </section>

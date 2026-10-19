@@ -43,9 +43,6 @@ export function LiveCodesHub() {
   const [loading, setLoading] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
-  const [toast, setToast] = useState('')
-  const [converted, setConverted] = useState<Record<string, { code: string; country: 'GHANA' | 'NIGERIA' }>>({})
-  const [convertingId, setConvertingId] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   const refresh = useCallback(async () => {
@@ -81,12 +78,6 @@ export function LiveCodesHub() {
   }, [])
 
   useEffect(() => {
-    if (!toast) return undefined
-    const timer = setTimeout(() => setToast(''), 2500)
-    return () => clearTimeout(timer)
-  }, [toast])
-
-  useEffect(() => {
     if (!copiedId) return undefined
     const timer = setTimeout(() => setCopiedId(null), 2000)
     return () => clearTimeout(timer)
@@ -99,33 +90,6 @@ export function LiveCodesHub() {
     } catch {
       setError('Could not copy the code. Select it manually instead.')
     }
-  }
-
-  async function convertCode(item: LiveCode) {
-    const code = converted[item.id]?.code ?? item.code
-    const country = converted[item.id]?.country ?? item.countryCode
-    if (country === 'NIGERIA') {
-      setConvertingId(item.id)
-      try {
-        const response = await fetch(`/api/convert-code?booking_code=${encodeURIComponent(code)}&from=sportybet:ng&to=sportybet:gh`)
-        const payload = await response.json().catch(() => null) as { success?: boolean; convertedCode?: string } | null
-        if (!payload?.success || !payload.convertedCode) throw new Error('Conversion failed')
-        const convertedCode = payload.convertedCode
-        setConverted((current) => ({ ...current, [item.id]: { code: convertedCode, country: 'GHANA' } }))
-        await navigator.clipboard.writeText(convertedCode).catch(() => undefined)
-        setToast('Converted to Ghana code & copied!')
-      } catch {
-        window.open('https://convertbetcodes.com/', '_blank', 'noopener,noreferrer')
-      } finally {
-        setConvertingId(null)
-      }
-      return
-    }
-    window.open('https://convertbetcodes.com/', '_blank', 'noopener,noreferrer')
-    void navigator.clipboard.writeText(code).then(
-      () => setToast('Code copied! Opening universal converter...'),
-      () => setError('Could not copy the code. Select it manually instead.'),
-    )
   }
 
   const items = feed?.[bookie] ?? []
@@ -152,8 +116,7 @@ export function LiveCodesHub() {
         <input type="checkbox" checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} />
         Auto-refresh every 60 seconds
       </label>
-      <p className="live-codes__guide">Works with all SportyBet codes (NG, KE, GH, UG) and Betway. Click 'Convert Code ⇄' to convert any foreign slip directly for your account.</p>
-      {toast && <p className="live-codes__toast" role="status">{toast}</p>}
+      <p className="live-codes__guide">Works with all SportyBet codes (NG, KE, GH, UG) and Betway.</p>
       {error && <p className="live-codes__error" role="alert">{error}</p>}
       {feed?.warnings?.map((warning) => <p className="live-codes__warning" key={warning}>Some channels could not refresh: {warning}</p>)}
       {!error && !loading && items.length === 0 && <p className="live-codes__empty">No {meta.label} codes found right now.</p>}
@@ -161,9 +124,9 @@ export function LiveCodesHub() {
         {items.map((item) => (
           <li className="live-code" key={item.id}>
             <div className="live-code__main">
-              <strong className="live-code__code">              {converted[item.id]?.code ?? item.code}</strong>
+              <strong className="live-code__code">{item.code}</strong>
               <span className="live-code__country">
-                              {converted[item.id]?.country ?? item.countryCode ?? 'GHANA'}
+                {item.countryCode ?? 'GHANA'}
               </span>
             </div>
             <div className="live-code__tags">
@@ -174,10 +137,7 @@ export function LiveCodesHub() {
             <div className="live-code__actions">
               <button className="quiet-button" type="button" onClick={() => void copyCode(item)}>
                 {copiedId === item.id ? '✓ Code Copied!' : 'Copy Code'}
-              </button>
-                            <button className="quiet-button" type="button" disabled={convertingId === item.id} onClick={() => void convertCode(item)}>
-                              {convertingId === item.id ? 'Converting...' : 'Convert Code ⇄'}
-                            </button>
+              </button>
             </div>
           </li>
         ))}
