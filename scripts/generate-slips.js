@@ -66,45 +66,21 @@ const OUT_FILE = 'generated_codes.txt';
       console.log(`[Slip ${s}/${SLIPS}] Total picks gathered: ${picked}/${LEGS}`);
 
       if (picked >= LEGS) {
-        // Open the betslip drawer using the bottom bar badge
-        const betslipBadge = page.locator('.m-bottom-nav .m-icon-betslip, [data-op="betslip"], .m-betslip-badge, .m-bottom-nav-item').first();
-        await betslipBadge.click({ force: true });
-        await page.waitForTimeout(3000);
+        // Open the betslip via the floating icon unless it is already open
+        const bookBtn = page.locator('.m-book-btn');
+        if (!(await bookBtn.isVisible().catch(() => false))) {
+          await page.locator('.betslip-theme-icon').first().click();
+        }
+        await bookBtn.waitFor({ timeout: 10000 });
+        await bookBtn.click();
 
-        // Click Book Bet / Share Code button
-        const bookBtn = page.locator('button, .m-btn, .m-betslip-book, [data-op="book"]').filter({ hasText: /book/i }).first();
-        await bookBtn.waitFor({ state: 'visible', timeout: 8000 });
-        await bookBtn.click({ force: true });
-        await page.waitForTimeout(3500);
-
-        // Extract the SportyBet Ghana booking code
-        const codeLocators = [
-          '.m-booking-code',
-          '.m-code',
-          '.share-code',
-          '.booking-code',
-          '.m-dialog-booking .code',
-          '[class*="booking-code"]'
-        ];
-
+        // The confirmation dialog shows "Booking Code <CODE>"
         let cleanCode = '';
-        for (const sel of codeLocators) {
-          const el = page.locator(sel).first();
-          if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
-            const raw = await el.innerText().catch(() => '');
-            if (raw && raw.trim().length >= 4) {
-              cleanCode = raw.trim().replace(/[^A-Z0-9]/gi, '');
-              break;
-            }
-          }
-        }
-
-        if (!cleanCode) {
-          // If modal text contains the code in a paragraph or heading
-          const dialogText = await page.locator('.m-dialog, .m-modal, [role="dialog"]').innerText().catch(() => '');
-          const match = dialogText.match(/[A-Z0-9]{6,7}/);
-          if (match) cleanCode = match[0];
-        }
+        const codeBody = page.locator('.m-booking-code-body');
+        await codeBody.waitFor({ timeout: 15000 }).catch(() => undefined);
+        const bodyText = await codeBody.innerText().catch(() => '');
+        const match = bodyText.match(/Booking Code\s*([A-Z0-9]{6,7})\b/);
+        if (match) cleanCode = match[1];
 
         if (cleanCode) {
           const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Market: ${MARKET} | Legs: ${LEGS}\n`;
@@ -114,16 +90,18 @@ const OUT_FILE = 'generated_codes.txt';
           console.log(`[Slip ${s}/${SLIPS}] Clicked Book Bet, waiting for code modal...`);
         }
 
-        // Cleanly clear selections for the next slip
-        const removeAll = page.locator('button, span, .m-icon-delete, [data-op="remove-all"]').filter({ hasText: /remove all|clear/i }).first();
-        if (await removeAll.isVisible({ timeout: 3000 }).catch(() => false)) {
-          await removeAll.click({ force: true });
-          await page.waitForTimeout(1000);
-        } else {
-          // Close drawer if remove-all is not visible
-          await page.keyboard.press('Escape');
-          await page.waitForTimeout(1000);
+        // Clicking the dialog mask closes it (Escape does not); then remove-all + OK empties the slip
+        if (await codeBody.isVisible().catch(() => false)) {
+          await page.mouse.click(195, 20);
+          await codeBody.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => undefined);
         }
+        const removeAll = page.locator('.remove-all').first();
+        if (!(await removeAll.isVisible().catch(() => false))) {
+          await page.locator('.betslip-theme-icon').first().click();
+        }
+        await removeAll.click();
+        await page.getByText(/^(ok|yes|confirm)$/i).first().click({ timeout: 5000 });
+        await page.waitForTimeout(400);
       }
     }
   } catch (err) {
