@@ -1,4 +1,21 @@
-﻿import type { ApiFootballFixture, ApiPayload, FixturesRequest, FixturesResponse } from './fixtures-types';
+﻿export interface FixturesRequest {
+  method?: string;
+  query?: Record<string, string | string[] | undefined>;
+  headers?: Record<string, string | string[] | undefined>;
+  socket?: { remoteAddress?: string };
+}
+
+export interface FixturesResponse {
+  setHeader: (name: string, value: string | number) => void;
+  status: (code: number) => {
+    json: (body: any) => void;
+  };
+}
+
+export interface ApiPayload {
+  response?: any[];
+  errors?: any;
+}
 
 const UPSTREAM_TIMEOUT_MS = 8000;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -30,7 +47,6 @@ export default async function fixturesHandler(request: FixturesRequest, response
     return response.status(405).json({ error: 'Method not allowed.' });
   }
 
-  // Get current Date in Ghana GMT (UTC)
   const now = new Date();
   const ghanaDateStr = now.toISOString().slice(0, 10);
   const date = typeof request.query?.date === 'string' ? request.query.date : ghanaDateStr;
@@ -49,7 +65,7 @@ export default async function fixturesHandler(request: FixturesRequest, response
   try {
     const url = new URL('https://v3.football.api-sports.io/fixtures');
     url.searchParams.set('date', date);
-    url.searchParams.set('timezone', 'UTC'); // Ghana is strictly UTC/GMT
+    url.searchParams.set('timezone', 'UTC');
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
@@ -67,14 +83,13 @@ export default async function fixturesHandler(request: FixturesRequest, response
       return response.status(502).json({ error: `Upstream error: HTTP ${upstream.status}` });
     }
 
-    const payload = await upstream.json() as ApiPayload;
+    const payload = (await upstream.json()) as ApiPayload;
     const items = payload.response || [];
 
     const mapped = items
       .filter((item: any) => item?.fixture?.id && item?.teams?.home?.name && item?.teams?.away?.name)
       .map((item: any) => {
         const d = new Date(item.fixture.date);
-        // Format strictly in GMT (Ghana Time)
         const hours = String(d.getUTCHours()).padStart(2, '0');
         const mins = String(d.getUTCMinutes()).padStart(2, '0');
         return {
