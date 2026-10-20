@@ -1519,3 +1519,62 @@ h2 {
     text-align: right;
   }
 }
+
+/* Prominent Team Copy Buttons */
+.round-fixture__teams {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  margin-top: 6px !important;
+}
+
+.team-chip {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  background: #f1f5f9 !important;
+  border: 1.5px solid #cbd5e1 !important;
+  border-radius: 8px !important;
+  padding: 6px 12px !important;
+  font-size: 0.95rem !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  cursor: pointer !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06) !important;
+}
+
+.team-chip:active {
+  transform: scale(0.96) !important;
+  background: #e2e8f0 !important;
+}
+
+.team-chip.is-copied {
+  background: #ecfdf5 !important;
+  border-color: #10b981 !important;
+  color: #047857 !important;
+}
+
+.team-chip--icon {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  padding: 6px 10px !important;
+  color: #64748b !important;
+  margin-left: auto !important;
+}
+
+.team-vs {
+  font-size: 0.75rem !important;
+  font-weight: 800 !important;
+  color: #94a3b8 !important;
+  text-transform: uppercase !important;
+}
+
+.copy-tooltip {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 3px !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  color: #059669 !important;
+}
