@@ -39,7 +39,7 @@ function checkRateLimit(clientId: string, now: number) {
 }
 
 export default async function fixturesHandler(request: FixturesRequest, response: FixturesResponse) {
-  response.setHeader('Cache-Control', 'public, max-age=180, s-maxage=300, stale-while-revalidate=600');
+  response.setHeader('Cache-Control', 'public, max-age=120, s-maxage=180, stale-while-revalidate=300');
   response.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (request.method !== 'GET') {
@@ -86,8 +86,23 @@ export default async function fixturesHandler(request: FixturesRequest, response
     const payload = (await upstream.json()) as ApiPayload;
     const items = payload.response || [];
 
+    // Filter to upcoming, unplayed matches
+    const currentTimeMs = Date.now() - 5 * 60 * 1000; // 5 minute buffer
+
     const mapped = items
-      .filter((item: any) => item?.fixture?.id && item?.teams?.home?.name && item?.teams?.away?.name)
+      .filter((item: any) => {
+        if (!item?.fixture?.id || !item?.teams?.home?.name || !item?.teams?.away?.name) return false;
+        
+        // Exclude finished, in-play, or cancelled matches
+        const status = item.fixture.status?.short || '';
+        const isNotStarted = status === 'NS' || status === 'TBD';
+        
+        // Exclude matches whose kickoff has already passed
+        const kickoffTimeMs = new Date(item.fixture.date).getTime();
+        const isFuture = kickoffTimeMs >= currentTimeMs;
+
+        return isNotStarted && isFuture;
+      })
       .map((item: any) => {
         const d = new Date(item.fixture.date);
         const hours = String(d.getUTCHours()).padStart(2, '0');
@@ -95,7 +110,7 @@ export default async function fixturesHandler(request: FixturesRequest, response
         return {
           id: String(item.fixture.id),
           date: item.fixture.date,
-          status: item.fixture.status?.short || 'NS',
+          status: 'NS',
           kickoff: `${hours}:${mins} GMT`,
           kickoffDate: item.fixture.date,
           competition: item.league?.name || 'Football',
