@@ -7,14 +7,14 @@ const getArg = (key, fallback) => {
   return match ? match.split('=')[1] : fallback;
 };
 
-const MARKET = getArg('market', 'OVER_1_5');
-const LEGS = parseInt(getArg('legs', '3'), 10);
-const SLIPS = parseInt(getArg('slips', '1'), 10);
+const LEGS = parseInt(getArg('legs', '14'), 10);
+const SLIPS = parseInt(getArg('slips', '7'), 10);
+const DAY = getArg('day', 'Today'); // 'Today' or 'Tomorrow'
 const OUT_FILE = 'generated_codes.txt';
 
 (async () => {
-  console.log(`Starting Cloud Generator: Market=${MARKET}, Legs=${LEGS}, Slips=${SLIPS}`);
-  const browser = await chromium.launch({ headless: true });
+  console.log(`Starting Stable Slip Generator: Day=${DAY}, Legs=${LEGS}, Slips=${SLIPS}...`);
+  const browser = await chromium.launch({ headless: false, slowMo: 70 });
   const context = await browser.newContext({
     ...devices['iPhone 13'],
     locale: 'en-GH',
@@ -23,100 +23,142 @@ const OUT_FILE = 'generated_codes.txt';
   const page = await context.newPage();
 
   try {
-    await page.goto('https://www.sportybet.com/gh/m/sport/football', { waitUntil: 'domcontentloaded', timeout: 45000 });
-    await page.waitForTimeout(4000);
-
-    const ouTab = page.locator('.m-market-tab, span, div').filter({ hasText: /^O\/U$/i }).first();
-    if (await ouTab.isVisible({ timeout: 6000 }).catch(() => false)) {
-      await ouTab.click();
-      await page.waitForTimeout(2500);
-    }
-
     for (let s = 1; s <= SLIPS; s++) {
-      let picked = 0;
+      console.log(`\n==========================================`);
+      console.log(`Generating Slip ${s}/${SLIPS} (${LEGS} legs)...`);
+      console.log(`==========================================`);
+
+      // 1. Fresh page load
+      await page.goto('https://www.sportybet.com/gh/m/sport/football', { waitUntil: 'domcontentloaded', timeout: 50000 });
+      await page.waitForTimeout(3000);
+
+      // 2. Set Sort to 'Time' (as shown in video at 0:03-0:05)
+      try {
+        const sortDropdown = page.locator('span, div').filter({ hasText: /^Sort$/i }).first();
+        if (await sortDropdown.isVisible({ timeout: 3000 })) {
+          await sortDropdown.click({ force: true });
+          await page.waitForTimeout(500);
+          const timeOption = page.locator('span, div, li').filter({ hasText: /^Time$/i }).first();
+          if (await timeOption.isVisible({ timeout: 2000 })) {
+            await timeOption.click({ force: true });
+            await page.waitForTimeout(1000);
+          }
+        }
+      } catch (_) {}
+
+      // 3. Set Date Filter (Today / Tomorrow as shown in video at 0:08-0:10)
+      try {
+        const dateDropdown = page.locator('span, div').filter({ hasText: /^(Today|Tomorrow|All)/i }).first();
+        if (await dateDropdown.isVisible({ timeout: 3000 })) {
+          await dateDropdown.click({ force: true });
+          await page.waitForTimeout(600);
+          const targetDay = page.locator('span, div, li').filter({ hasText: new RegExp(`^${DAY}`, 'i') }).first();
+          if (await targetDay.isVisible({ timeout: 2000 })) {
+            await targetDay.click({ force: true });
+            await page.waitForTimeout(1500);
+          }
+        }
+      } catch (_) {}
+
+      // 4. Switch to O/U market tab
+      try {
+        const ouTab = page.locator('.m-market-tab, span, div').filter({ hasText: /^O\/U$/i }).first();
+        if (await ouTab.isVisible({ timeout: 4000 })) {
+          await ouTab.click({ force: true });
+          await page.waitForTimeout(1500);
+        }
+      } catch (_) {}
+
+      // 5. Gather unique matches
+      const pickedMatchIds = new Set();
       let scrollAttempts = 0;
 
-      while (picked < LEGS && scrollAttempts < 30) {
-        const buttons = await page.locator('.m-outcome, .m-table-cell, .m-odds-btn, [data-op="label-odds"]').all();
+      while (pickedMatchIds.size < LEGS && scrollAttempts < 45) {
+        const cards = await page.locator('[data-key]:has(.m-event-sport)').all();
+        const shuffled = cards.sort(() => 0.5 - Math.random());
 
-        for (const btn of buttons) {
-          if (picked >= LEGS) break;
+        for (const card of shuffled) {
+          if (pickedMatchIds.size >= LEGS) break;
           try {
-            if (await btn.isVisible()) {
-              const text = await btn.innerText().catch(() => '');
-              const isSelected = await btn.evaluate(el => el.classList.contains('m-outcome--selected') || el.classList.contains('active') || el.classList.contains('m-outcome--checked')).catch(() => false);
-              
-              if (!isSelected && text && text.trim().length > 0 && !isNaN(parseFloat(text.trim()))) {
-                await btn.click({ timeout: 1500, force: true });
-                picked++;
-                await page.waitForTimeout(500);
+            const cardId = await card.getAttribute('data-key');
+            if (!cardId || pickedMatchIds.has(cardId)) continue;
+
+            const oddsButtons = await card.locator('[data-op="label-odds"], .m-outcome').all();
+            if (oddsButtons.length > 0) {
+              const btn = oddsButtons[Math.floor(Math.random() * oddsButtons.length)];
+              const oddsText = await btn.innerText().catch(() => '');
+              const odds = parseFloat(oddsText.trim());
+
+              if (!isNaN(odds) && odds >= 1.05) {
+                await btn.scrollIntoViewIfNeeded().catch(() => {});
+                await btn.click({ force: true }).catch(() => {});
+                pickedMatchIds.add(cardId);
+                console.log(`[Slip ${s}/${SLIPS}] Picked match ${pickedMatchIds.size}/${LEGS} (Odds: ${odds})`);
+                await page.waitForTimeout(200);
               }
             }
           } catch (_) {}
         }
 
-        if (picked < LEGS) {
-          await page.mouse.wheel(0, 1500);
-          await page.waitForTimeout(1000);
+        if (pickedMatchIds.size < LEGS) {
+          await page.mouse.wheel(0, 1000);
+          await page.waitForTimeout(600);
           scrollAttempts++;
         }
       }
 
-      console.log(`[Slip ${s}/${SLIPS}] Total picks gathered: ${picked}/${LEGS}`);
+      console.log(`[Slip ${s}/${SLIPS}] Total matches gathered: ${pickedMatchIds.size}/${LEGS}`);
 
-      if (picked >= LEGS) {
-        // Open betslip only if book button is not yet visible
-        const existingBook = page.locator('.m-book-btn, button:has-text("Book Bet")').first();
-        if (!(await existingBook.isVisible({ timeout: 1500 }).catch(() => false))) {
-          const icon = page.locator('.betslip-theme-icon, #m-betslip, [data-op="betslip"]').first();
-          await icon.click({ force: true });
-          await page.waitForTimeout(3000);
+      if (pickedMatchIds.size >= LEGS) {
+        // Dismiss tooltips
+        await page.evaluate(() => {
+          document.querySelectorAll('.m-popover, .m-tooltip, [class*="early-goals"]').forEach(el => el.remove());
+        }).catch(() => {});
+        await page.waitForTimeout(300);
+
+        // Open betslip
+        await page.mouse.click(335, 710);
+        await page.waitForTimeout(2000);
+
+        // Click Book Bet
+        console.log(`Booking Slip ${s}/${SLIPS}...`);
+        await page.evaluate(() => {
+          const btn = document.querySelector('.m-book-btn') || 
+                      document.querySelector('[data-op="book-bet"]') ||
+                      Array.from(document.querySelectorAll('div, button, span')).find(el => el.textContent && el.textContent.trim().toLowerCase() === 'book bet');
+          if (btn) btn.click();
+        });
+        await page.waitForTimeout(3500);
+
+        // Read Code
+        let code = '';
+        const codeElement = page.locator('.m-booking-code-body, .m-booking-code, .share-code').first();
+        if (await codeElement.isVisible({ timeout: 5000 }).catch(() => false)) {
+          const raw = await codeElement.innerText().catch(() => '');
+          const match = raw.match(/([A-Z0-9]{6,7})/);
+          if (match) code = match[1];
         }
 
-        // Click Book Bet directly
-        const bookBtn = page.locator('.m-book-btn, [data-op="book-bet"], button:has-text("Book Bet"), button:has-text("Book")').first();
-        await bookBtn.scrollIntoViewIfNeeded().catch(() => {});
-        await bookBtn.click({ force: true });
-        await page.waitForTimeout(4000);
-
-        // Read booking code
-        let bookingCode = '';
-        const codeElement = page.locator('.m-booking-code-body, .m-booking-code, .m-dialog-booking, .share-code').first();
-        if (await codeElement.isVisible({ timeout: 8000 }).catch(() => false)) {
-          const text = await codeElement.innerText().catch(() => '');
-          const match = text.match(/([A-Z0-9]{6,7})/);
-          if (match) bookingCode = match[1];
-        }
-
-        if (!bookingCode) {
+        if (!code) {
           const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
           const match = bodyText.match(/Booking Code\s*[:\-]?\s*([A-Z0-9]{6,7})/i) || bodyText.match(/Code\s*[:\-]?\s*([A-Z0-9]{6,7})/i);
-          if (match) bookingCode = match[1];
+          if (match) code = match[1];
         }
 
-        const cleanCode = bookingCode || 'GENERATED';
-        const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Market: ${MARKET} | Legs: ${LEGS}\n`;
-        console.log(`>>> BOOKED: ${entry.trim()}`);
-        fs.appendFileSync(OUT_FILE, entry);
+        const cleanCode = code || 'BOOKED';
+        const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Day: ${DAY} | Legs: ${LEGS}`;
+        console.log(`\n==========================================`);
+        console.log(`SUCCESS: ${entry}`);
+        console.log(`==========================================\n`);
+        fs.appendFileSync(OUT_FILE, entry + '\n');
 
-        // Close modal and clear
-        await page.mouse.click(195, 20).catch(() => {});
-        await page.waitForTimeout(1000);
-
-        const removeAll = page.locator('.remove-all, button:has-text("Remove All"), button:has-text("Clear")').first();
-        if (await removeAll.isVisible({ timeout: 3000 }).catch(() => false)) {
-          await removeAll.click({ force: true });
-          await page.waitForTimeout(500);
-          const okBtn = page.locator('button:has-text("OK")').first();
-          if (await okBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-            await okBtn.click({ force: true });
-          }
-        }
+        await page.waitForTimeout(1500);
       }
     }
   } catch (err) {
-    console.error(`Execution error: ${err.message}`);
+    console.error(`Script error: ${err.message}`);
   } finally {
     await browser.close();
+    console.log('Batch complete.');
   }
 })();

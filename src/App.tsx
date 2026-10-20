@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   Activity,
   ArrowDownToLine,
+  Check,
   CircleHelp,
+  Copy,
   Plus,
   RefreshCw,
   Trash2,
@@ -247,6 +249,25 @@ function sanitizePlainText(value: string, maxLength: number) {
 
 function selectionProbability(probabilities: MarketProbabilities, market: Market) {
   return probabilities[marketForSelection[market]]
+}
+
+function CopyButton({ text, label, className, children }: { text: string; label: string; className: string; children: React.ReactNode }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1400)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return (
+    <button className={`${className}${copied ? ' is-copied' : ''}`} type="button" onClick={handleCopy} aria-label={`${label}: ${text}`} title={`Copy ${text}`}>
+      {children}
+      {copied && <span className="copy-tooltip" role="status"><Check size={11} /> Copied!</span>}
+    </button>
+  )
 }
 
 function App() {
@@ -801,7 +822,12 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
                             <div className="round-fixture__head">
                               <div className="round-fixture__title">
                                 <span className="round-fixture__index">{index + 1}.</span>
-                                <strong>{fixture.home} vs {fixture.away}</strong>
+                                <strong className="round-fixture__teams">
+                                  <CopyButton className="team-chip" label="Copy home team" text={fixture.home}>{fixture.home}</CopyButton>
+                                  <span className="team-vs">vs</span>
+                                  <CopyButton className="team-chip" label="Copy away team" text={fixture.away}>{fixture.away}</CopyButton>
+                                  <CopyButton className="team-chip team-chip--icon" label="Copy match" text={`${fixture.home} vs ${fixture.away}`}><Copy size={14} /></CopyButton>
+                                </strong>
                               </div>
                               <button className="icon-button" type="button" onClick={() => toggleRoundFixture(fixture.id)} aria-label={`Remove ${fixture.home} versus ${fixture.away} from round lineup`}><Trash2 size={13} /></button>
                             </div>
