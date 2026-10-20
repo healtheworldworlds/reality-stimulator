@@ -33,7 +33,7 @@ export const GLOBAL_CLUB_REGISTRY = {
     'Newcastle United', 'Tottenham Hotspur', 'Aston Villa', 'West Ham United',
   ],
   'La Liga': [
-    'Real Madrid', 'Barcelona', 'Atl?tico Madrid', 'Sevilla', 'Real Sociedad',
+    'Real Madrid', 'Barcelona', 'Atletico Madrid', 'Sevilla', 'Real Sociedad',
     'Athletic Club', 'Villarreal', 'Real Betis',
   ],
   'Serie A': [
@@ -41,7 +41,7 @@ export const GLOBAL_CLUB_REGISTRY = {
   ],
   Bundesliga: [
     'Bayern Munich', 'Borussia Dortmund', 'RB Leipzig', 'Bayer Leverkusen',
-    'Eintracht Frankfurt', 'VfB Stuttgart', 'Borussia M?nchengladbach', 'VfL Wolfsburg',
+    'Eintracht Frankfurt', 'VfB Stuttgart', 'Borussia Mönchengladbach', 'VfL Wolfsburg',
   ],
   'Ligue 1': [
     'Paris Saint-Germain', 'Marseille', 'Lyon', 'Monaco', 'Lille', 'Nice', 'Lens', 'Rennes',
@@ -50,7 +50,7 @@ export const GLOBAL_CLUB_REGISTRY = {
     'Ajax', 'PSV Eindhoven', 'Feyenoord', 'AZ Alkmaar', 'FC Twente', 'FC Utrecht',
   ],
   'Primeira Liga': [
-    'Benfica', 'FC Porto', 'Sporting CP', 'Braga', 'Vit?ria de Guimar?es', 'Boavista',
+    'Benfica', 'FC Porto', 'Sporting CP', 'Braga', 'Vitoria de Guimaraes', 'Boavista',
   ],
 } as const
 
