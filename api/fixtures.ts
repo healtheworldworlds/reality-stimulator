@@ -12,58 +12,16 @@ export interface FixturesResponse {
   };
 }
 
-export interface ApiPayload {
-  response?: any[];
-  errors?: any;
-}
-
-const UPSTREAM_TIMEOUT_MS = 8000;
-const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT_MAX_REQUESTS = 30;
-const rateLimits = new Map<string, { count: number; resetAt: number }>();
-
-function checkRateLimit(clientId: string, now: number) {
-  for (const [key, entry] of rateLimits.entries()) {
-    if (entry.resetAt <= now) rateLimits.delete(key);
-  }
-  const current = rateLimits.get(clientId);
-  if (!current || current.resetAt <= now) {
-    rateLimits.set(clientId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return { allowed: true, resetAt: now + RATE_LIMIT_WINDOW_MS, remaining: RATE_LIMIT_MAX_REQUESTS - 1 };
-  }
-  if (current.count >= RATE_LIMIT_MAX_REQUESTS) {
-    return { allowed: false, resetAt: current.resetAt, remaining: 0 };
-  }
-  current.count += 1;
-  return { allowed: true, resetAt: current.resetAt, remaining: RATE_LIMIT_MAX_REQUESTS - current.count };
-}
-
-// Comprehensive SportyBet Ghana verified competitions
-const SPORTYBET_LEAGUES_EXPANDED = new Set<number>([
-  // UEFA & International
-  2, 3, 848, 531, 1, 4, 5, 15, 11, 12, 13, 20, 21, 849, 1032,
-  // England
-  39, 40, 41, 42, 45, 48, 46, 50, 51, 52, 47, 54, 55, 683,
-  // Spain
-  140, 141, 143, 435, 436, 437, 438, 439, 440,
-  // Italy
-  135, 136, 137, 138, 715, 716, 717,
-  // Germany
-  78, 79, 81, 82, 83, 84,
-  // France
-  61, 62, 66, 63,
-  // Japan, Asia & Oceania
-  98, 99, 100, 311, 17, 307, 301, 292, 293, 294, 305, 306,
-  // Americas
-  253, 255, 256, 71, 72, 73, 75, 480, 128, 130, 262, 263, 239, 240, 242, 265, 266,
-  // Africa
-  570, 288, 233, 234, 381, 382, 323, 324, 332,
-  // Netherlands, Belgium, Portugal & Rest of Europe
-  88, 89, 90, 144, 145, 94, 95, 96, 203, 204, 179, 180, 119, 120, 103, 113, 218, 207, 197, 345, 328, 118, 106, 333
-]);
+const UPSTREAM_TIMEOUT_MS = 9000;
+const SPORTYBET_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+  'Accept': 'application/json, text/plain, */*',
+  'Origin': 'https://www.sportybet.com',
+  'Referer': 'https://www.sportybet.com/gh/m/sport/football'
+};
 
 export default async function fixturesHandler(request: FixturesRequest, response: FixturesResponse) {
-  response.setHeader('Cache-Control', 'public, max-age=120, s-maxage=180, stale-while-revalidate=300');
+  response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=90, stale-while-revalidate=180');
   response.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (request.method !== 'GET') {
@@ -71,106 +29,109 @@ export default async function fixturesHandler(request: FixturesRequest, response
     return response.status(405).json({ error: 'Method not allowed.' });
   }
 
-  const now = new Date();
-  const ghanaDateStr = now.toISOString().slice(0, 10);
-  const date = typeof request.query?.date === 'string' ? request.query.date : ghanaDateStr;
-
-  const clientId = (request.headers?.['x-forwarded-for'] as string)?.split(',')[0] || request.socket?.remoteAddress || 'unknown';
-  const limit = checkRateLimit(clientId, Date.now());
-  if (!limit.allowed) {
-    return response.status(429).json({ error: 'Too many requests. Please try again shortly.' });
-  }
-
-  const apiKey = process.env.FOOTBALL_API_KEY?.trim();
-  if (!apiKey) {
-    return response.status(503).json({ error: 'FOOTBALL_API_KEY is not configured in Vercel environment.' });
-  }
-
   try {
-    const url = new URL('https://v3.football.api-sports.io/fixtures');
-    url.searchParams.set('date', date);
-    url.searchParams.set('timezone', 'UTC');
-
+    // 1. Fetch live upcoming football events from SportyBet Ghana directly
+    const sportyUrl = 'https://www.sportybet.com/api/gh/factsCenter/pcUpcomingEvents?sportId=sr:sport:1&_t=' + Date.now();
+    
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 
-    const upstream = await fetch(url.toString(), {
-      headers: {
-        'x-apisports-key': apiKey,
-        'Accept': 'application/json'
-      },
+    const upstream = await fetch(sportyUrl, {
+      headers: SPORTYBET_HEADERS,
       signal: controller.signal
     });
     clearTimeout(timer);
 
-    if (!upstream.ok) {
-      return response.status(502).json({ error: `Upstream error: HTTP ${upstream.status}` });
+    let sportyEvents: any[] = [];
+    if (upstream.ok) {
+      const data = await upstream.json();
+      const tournaments = data?.data?.tournaments || [];
+      for (const t of tournaments) {
+        for (const e of (t.events || [])) {
+          if (e.eventId && e.status === 'not_started') {
+            // Find Over 1.5 market directly in the feed if present
+            let over15Odd = 0;
+            const markets = e.markets || [];
+            for (const m of markets) {
+              if (m.specifier === 'total=1.5' || (m.desc && m.desc.includes('1.5'))) {
+                const overOutcome = (m.outcomes || []).find((o: any) => o.desc === 'Over' || o.id === '12');
+                if (overOutcome?.odds) {
+                  over15Odd = parseFloat(overOutcome.odds);
+                }
+              }
+            }
+
+            sportyEvents.push({
+              id: e.eventId,
+              home: e.homeTeamName || 'Home',
+              away: e.awayTeamName || 'Away',
+              competition: t.name || 'SportyBet Football',
+              kickoffDate: new Date(e.estimateStartTime || Date.now()).toISOString(),
+              estimateStartTime: e.estimateStartTime,
+              odds: over15Odd
+            });
+          }
+        }
+      }
     }
 
-    const payload = (await upstream.json()) as ApiPayload;
-    const items = payload.response || [];
-    const currentTimeMs = Date.now() - 5 * 60 * 1000;
+    // 2. If SportyBet list loaded, format mapped fixtures with exact Ghana GMT kickoff
+    if (sportyEvents.length > 0) {
+      const nowMs = Date.now();
+      const mapped = sportyEvents
+        .filter((e) => !e.estimateStartTime || e.estimateStartTime >= nowMs)
+        .map((e) => {
+          const d = new Date(e.estimateStartTime || Date.now());
+          const hours = String(d.getUTCHours()).padStart(2, '0');
+          const mins = String(d.getUTCMinutes()).padStart(2, '0');
+          return {
+            id: String(e.id),
+            date: e.kickoffDate,
+            status: 'NS',
+            kickoff: `${hours}:${mins} GMT`,
+            kickoffDate: e.kickoffDate,
+            competition: e.competition,
+            home: e.home,
+            away: e.away,
+            sportyOdd: e.odds > 0 ? e.odds : null,
+            teams: { home: e.home, away: e.away }
+          };
+        });
 
-    const mapped = items
-      .filter((item: any) => {
-        if (!item?.fixture?.id || !item?.teams?.home?.name || !item?.teams?.away?.name) return false;
+      return response.status(200).json({ status: 'available', response: mapped, source: 'sportybet-gh' });
+    }
 
-        const leagueId = Number(item.league?.id);
-        const leagueName = (item.league?.name || '').toLowerCase();
+    // 3. Fallback to API-Football if SportyBet rate limits upstream
+    const apiKey = process.env.FOOTBALL_API_KEY?.trim();
+    if (apiKey) {
+      const today = new Date().toISOString().slice(0, 10);
+      const fbUrl = `https://v3.football.api-sports.io/fixtures?date=${today}&timezone=UTC`;
+      const fbRes = await fetch(fbUrl, { headers: { 'x-apisports-key': apiKey, 'Accept': 'application/json' } });
+      if (fbRes.ok) {
+        const payload = await fbRes.json();
+        const items = (payload.response || []).filter((i: any) => i?.fixture?.id && i.fixture.status?.short === 'NS');
+        const mapped = items.map((i: any) => {
+          const d = new Date(i.fixture.date);
+          const hours = String(d.getUTCHours()).padStart(2, '0');
+          const mins = String(d.getUTCMinutes()).padStart(2, '0');
+          return {
+            id: String(i.fixture.id),
+            date: i.fixture.date,
+            status: 'NS',
+            kickoff: `${hours}:${mins} GMT`,
+            kickoffDate: i.fixture.date,
+            competition: i.league?.name || 'Football',
+            home: i.teams.home.name.trim(),
+            away: i.teams.away.name.trim(),
+            teams: { home: i.teams.home.name.trim(), away: i.teams.away.name.trim() }
+          };
+        });
+        return response.status(200).json({ status: 'available', response: mapped, source: 'api-football' });
+      }
+    }
 
-        // 1. Check if ID matches SportyBet list OR contains recognized tournament keywords
-        const isRecognized = 
-          SPORTYBET_LEAGUES_EXPANDED.has(leagueId) ||
-          leagueName.includes('champions league') ||
-          leagueName.includes('sudamericana') ||
-          leagueName.includes('libertadores') ||
-          leagueName.includes('j1') ||
-          leagueName.includes('j2') ||
-          leagueName.includes('j3') ||
-          leagueName.includes('premier') ||
-          leagueName.includes('liga') ||
-          leagueName.includes('copa') ||
-          leagueName.includes('division') ||
-          leagueName.includes('pokal') ||
-          leagueName.includes('cup');
-
-        if (!isRecognized) return false;
-
-        // 2. Reject internal simulated virtuals (SRL) which have separate odds systems
-        if (leagueName.includes('srl') || leagueName.includes('simulated')) return false;
-
-        // 3. Status must be not started
-        const status = item.fixture.status?.short || '';
-        const isNotStarted = status === 'NS' || status === 'TBD';
-
-        // 4. Kickoff in future GMT
-        const kickoffTimeMs = new Date(item.fixture.date).getTime();
-        const isFuture = kickoffTimeMs >= currentTimeMs;
-
-        return isNotStarted && isFuture;
-      })
-      .map((item: any) => {
-        const d = new Date(item.fixture.date);
-        const hours = String(d.getUTCHours()).padStart(2, '0');
-        const mins = String(d.getUTCMinutes()).padStart(2, '0');
-        return {
-          id: String(item.fixture.id),
-          date: item.fixture.date,
-          status: 'NS',
-          kickoff: `${hours}:${mins} GMT`,
-          kickoffDate: item.fixture.date,
-          competition: item.league?.name || 'Football',
-          home: item.teams.home.name.trim(),
-          away: item.teams.away.name.trim(),
-          teams: {
-            home: item.teams.home.name.trim(),
-            away: item.teams.away.name.trim()
-          }
-        };
-      });
-
-    return response.status(200).json({ status: 'available', response: mapped });
+    return response.status(200).json({ status: 'fallback', response: [] });
   } catch (err: any) {
-    return response.status(500).json({ error: err.message || 'Failed to fetch fixtures' });
+    return response.status(500).json({ error: err.message || 'Failed to query match feed' });
   }
 }
