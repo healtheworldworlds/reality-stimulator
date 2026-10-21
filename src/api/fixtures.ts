@@ -15,8 +15,9 @@
 }
 
 export interface FixtureFetchResult {
-  status: 'available';
+  status: 'available' | 'fallback';
   fixtures: LiveFixture[];
+  reason?: string;
 }
 
 // 56 Verified real matches from today's active SportyBet Ghana board
@@ -87,7 +88,6 @@ export async function fetchTodaysFixtures(
   void startMinute;
   void endMinute;
 
-  // Formatted with exact team object structure expected by App.tsx
   const fixtures: LiveFixture[] = SPORTYBET_TODAY_FIXTURES.map(f => ({
     ...f,
     generatedId: f.id,
@@ -99,6 +99,7 @@ export async function fetchTodaysFixtures(
 
   return {
     status: 'available',
-    fixtures
+    fixtures,
+    reason: undefined
   };
 }
