@@ -22,6 +22,17 @@ const RATE_LIMIT_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_MAX_REQUESTS = 30;
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 
+// Exact SportyBet Ghana League IDs from src/engine/leagues.ts
+const SPORTYBET_LEAGUE_IDS = new Set<number>([
+  39, 40, 41, 45, 48,          // England: PL, Championship, L1, FA Cup, EFL Cup
+  140, 141, 143,               // Spain: La Liga, La Liga 2, Copa del Rey
+  135, 136, 137,               // Italy: Serie A, Serie B, Coppa Italia
+  78, 79, 81,                  // Germany: Bundesliga, 2. Bundesliga, DFB Pokal
+  61, 62,                      // France: Ligue 1, Ligue 2
+  2, 3, 848,                   // European: Champions League, Europa League, Conference League
+  88, 94, 253, 71, 128, 288, 570 // Eredivisie, Portugal, MLS, Brazil, Argentina, South Africa, Ghana
+]);
+
 function checkRateLimit(clientId: string, now: number) {
   for (const [key, entry] of rateLimits.entries()) {
     if (entry.resetAt <= now) rateLimits.delete(key);
@@ -86,18 +97,21 @@ export default async function fixturesHandler(request: FixturesRequest, response
     const payload = (await upstream.json()) as ApiPayload;
     const items = payload.response || [];
 
-    // Filter to upcoming, unplayed matches
-    const currentTimeMs = Date.now() - 5 * 60 * 1000; // 5 minute buffer
+    const currentTimeMs = Date.now() - 5 * 60 * 1000;
 
     const mapped = items
       .filter((item: any) => {
         if (!item?.fixture?.id || !item?.teams?.home?.name || !item?.teams?.away?.name) return false;
         
-        // Exclude finished, in-play, or cancelled matches
+        // 1. Must belong to a confirmed SportyBet league
+        const leagueId = Number(item.league?.id);
+        if (!SPORTYBET_LEAGUE_IDS.has(leagueId)) return false;
+
+        // 2. Must not be finished or in-play
         const status = item.fixture.status?.short || '';
         const isNotStarted = status === 'NS' || status === 'TBD';
-        
-        // Exclude matches whose kickoff has already passed
+
+        // 3. Kickoff must be in the future (Ghana GMT)
         const kickoffTimeMs = new Date(item.fixture.date).getTime();
         const isFuture = kickoffTimeMs >= currentTimeMs;
 
@@ -114,6 +128,8 @@ export default async function fixturesHandler(request: FixturesRequest, response
           kickoff: `${hours}:${mins} GMT`,
           kickoffDate: item.fixture.date,
           competition: item.league?.name || 'Football',
+          home: item.teams.home.name.trim(),
+          away: item.teams.away.name.trim(),
           teams: {
             home: item.teams.home.name.trim(),
             away: item.teams.away.name.trim()
