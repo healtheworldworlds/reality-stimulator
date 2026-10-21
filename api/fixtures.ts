@@ -12,13 +12,7 @@ export interface FixturesResponse {
   };
 }
 
-const UPSTREAM_TIMEOUT_MS = 9000;
-const SPORTYBET_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-  'Accept': 'application/json, text/plain, */*',
-  'Origin': 'https://www.sportybet.com',
-  'Referer': 'https://www.sportybet.com/gh/m/sport/football'
-};
+const UPSTREAM_TIMEOUT_MS = 10000;
 
 export default async function fixturesHandler(request: FixturesRequest, response: FixturesResponse) {
   response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=90, stale-while-revalidate=180');
@@ -30,104 +24,76 @@ export default async function fixturesHandler(request: FixturesRequest, response
   }
 
   try {
+    // SportyBet mobile endpoint with explicit headers
     const sportyUrl = 'https://www.sportybet.com/api/gh/factsCenter/pcUpcomingEvents?sportId=sr:sport:1&_t=' + Date.now();
     
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 
     const upstream = await fetch(sportyUrl, {
-      headers: SPORTYBET_HEADERS,
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://www.sportybet.com/gh/m/sport/football',
+        'Origin': 'https://www.sportybet.com'
+      },
       signal: controller.signal
     });
     clearTimeout(timer);
 
-    const sportyEvents: any[] = [];
-    if (upstream.ok) {
-      const data: any = await upstream.json();
-      const tournaments = data?.data?.tournaments || [];
-      for (const t of tournaments) {
-        for (const e of (t.events || [])) {
-          if (e.eventId && e.status === 'not_started') {
+    if (!upstream.ok) {
+      return response.status(502).json({ status: 'fallback', error: `SportyBet returned ${upstream.status}` });
+    }
+
+    const data: any = await upstream.json();
+    const tournaments = data?.data?.tournaments || [];
+    const mapped: any[] = [];
+    const nowMs = Date.now();
+
+    for (const t of tournaments) {
+      for (const e of (t.events || [])) {
+        if (e.eventId && e.status === 'not_started') {
+          const startMs = e.estimateStartTime || nowMs;
+          if (startMs >= nowMs) {
+            const d = new Date(startMs);
+            const hours = String(d.getUTCHours()).padStart(2, '0');
+            const mins = String(d.getUTCMinutes()).padStart(2, '0');
+
             let over15Odd = 0;
-            const markets = e.markets || [];
-            for (const m of markets) {
+            for (const m of (e.markets || [])) {
               if (m.specifier === 'total=1.5' || (m.desc && m.desc.includes('1.5'))) {
-                const overOutcome = (m.outcomes || []).find((o: any) => o.desc === 'Over' || o.id === '12');
-                if (overOutcome?.odds) {
-                  over15Odd = parseFloat(overOutcome.odds);
-                }
+                const over = (m.outcomes || []).find((o: any) => o.desc === 'Over' || o.id === '12');
+                if (over?.odds) over15Odd = parseFloat(over.odds);
               }
             }
 
-            sportyEvents.push({
-              id: e.eventId,
+            mapped.push({
+              id: String(e.eventId),
+              generatedId: String(e.eventId),
+              kickoff: `${hours}:${mins} GMT`,
+              kickoffDate: new Date(startMs).toISOString(),
+              status: 'NS',
+              competition: t.name || 'SportyBet Match',
               home: e.homeTeamName || 'Home',
               away: e.awayTeamName || 'Away',
-              competition: t.name || 'SportyBet Football',
-              kickoffDate: new Date(e.estimateStartTime || Date.now()).toISOString(),
-              estimateStartTime: e.estimateStartTime,
-              odds: over15Odd
+              sportyOdd: over15Odd > 0 ? over15Odd : undefined,
+              teams: {
+                home: e.homeTeamName || 'Home',
+                away: e.awayTeamName || 'Away'
+              }
             });
           }
         }
       }
     }
 
-    if (sportyEvents.length > 0) {
-      const nowMs = Date.now();
-      const mapped = sportyEvents
-        .filter((e) => !e.estimateStartTime || e.estimateStartTime >= nowMs)
-        .map((e) => {
-          const d = new Date(e.estimateStartTime || Date.now());
-          const hours = String(d.getUTCHours()).padStart(2, '0');
-          const mins = String(d.getUTCMinutes()).padStart(2, '0');
-          return {
-            id: String(e.id),
-            date: e.kickoffDate,
-            status: 'NS',
-            kickoff: `${hours}:${mins} GMT`,
-            kickoffDate: e.kickoffDate,
-            competition: e.competition,
-            home: e.home,
-            away: e.away,
-            sportyOdd: e.odds > 0 ? e.odds : null,
-            teams: { home: e.home, away: e.away }
-          };
-        });
-
-      return response.status(200).json({ status: 'available', response: mapped, source: 'sportybet-gh' });
+    if (mapped.length > 0) {
+      return response.status(200).json({ status: 'available', response: mapped, source: 'sportybet' });
     }
 
-    const apiKey = process.env.FOOTBALL_API_KEY?.trim();
-    if (apiKey) {
-      const today = new Date().toISOString().slice(0, 10);
-      const fbUrl = `https://v3.football.api-sports.io/fixtures?date=${today}&timezone=UTC`;
-      const fbRes = await fetch(fbUrl, { headers: { 'x-apisports-key': apiKey, 'Accept': 'application/json' } });
-      if (fbRes.ok) {
-        const payload: any = await fbRes.json();
-        const items = (payload?.response || []).filter((i: any) => i?.fixture?.id && i?.fixture?.status?.short === 'NS');
-        const mapped = items.map((i: any) => {
-          const d = new Date(i.fixture.date);
-          const hours = String(d.getUTCHours()).padStart(2, '0');
-          const mins = String(d.getUTCMinutes()).padStart(2, '0');
-          return {
-            id: String(i.fixture.id),
-            date: i.fixture.date,
-            status: 'NS',
-            kickoff: `${hours}:${mins} GMT`,
-            kickoffDate: i.fixture.date,
-            competition: i.league?.name || 'Football',
-            home: i.teams.home.name.trim(),
-            away: i.teams.away.name.trim(),
-            teams: { home: i.teams.home.name.trim(), away: i.teams.away.name.trim() }
-          };
-        });
-        return response.status(200).json({ status: 'available', response: mapped, source: 'api-football' });
-      }
-    }
-
-    return response.status(200).json({ status: 'fallback', response: [] });
+    return response.status(200).json({ status: 'fallback', response: [], error: 'No upcoming events found on SportyBet' });
   } catch (err: any) {
-    return response.status(500).json({ error: err.message || 'Failed to query match feed' });
+    return response.status(500).json({ status: 'fallback', error: err.message || 'Error fetching from SportyBet' });
   }
 }
