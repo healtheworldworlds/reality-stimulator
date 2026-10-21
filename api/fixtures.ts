@@ -30,7 +30,6 @@ export default async function fixturesHandler(request: FixturesRequest, response
   }
 
   try {
-    // 1. Fetch live upcoming football events from SportyBet Ghana directly
     const sportyUrl = 'https://www.sportybet.com/api/gh/factsCenter/pcUpcomingEvents?sportId=sr:sport:1&_t=' + Date.now();
     
     const controller = new AbortController();
@@ -42,14 +41,13 @@ export default async function fixturesHandler(request: FixturesRequest, response
     });
     clearTimeout(timer);
 
-    let sportyEvents: any[] = [];
+    const sportyEvents: any[] = [];
     if (upstream.ok) {
-      const data = await upstream.json();
+      const data: any = await upstream.json();
       const tournaments = data?.data?.tournaments || [];
       for (const t of tournaments) {
         for (const e of (t.events || [])) {
           if (e.eventId && e.status === 'not_started') {
-            // Find Over 1.5 market directly in the feed if present
             let over15Odd = 0;
             const markets = e.markets || [];
             for (const m of markets) {
@@ -75,7 +73,6 @@ export default async function fixturesHandler(request: FixturesRequest, response
       }
     }
 
-    // 2. If SportyBet list loaded, format mapped fixtures with exact Ghana GMT kickoff
     if (sportyEvents.length > 0) {
       const nowMs = Date.now();
       const mapped = sportyEvents
@@ -101,15 +98,14 @@ export default async function fixturesHandler(request: FixturesRequest, response
       return response.status(200).json({ status: 'available', response: mapped, source: 'sportybet-gh' });
     }
 
-    // 3. Fallback to API-Football if SportyBet rate limits upstream
     const apiKey = process.env.FOOTBALL_API_KEY?.trim();
     if (apiKey) {
       const today = new Date().toISOString().slice(0, 10);
       const fbUrl = `https://v3.football.api-sports.io/fixtures?date=${today}&timezone=UTC`;
       const fbRes = await fetch(fbUrl, { headers: { 'x-apisports-key': apiKey, 'Accept': 'application/json' } });
       if (fbRes.ok) {
-        const payload = await fbRes.json();
-        const items = (payload.response || []).filter((i: any) => i?.fixture?.id && i.fixture.status?.short === 'NS');
+        const payload: any = await fbRes.json();
+        const items = (payload?.response || []).filter((i: any) => i?.fixture?.id && i?.fixture?.status?.short === 'NS');
         const mapped = items.map((i: any) => {
           const d = new Date(i.fixture.date);
           const hours = String(d.getUTCHours()).padStart(2, '0');
