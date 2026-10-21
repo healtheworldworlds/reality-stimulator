@@ -81,14 +81,38 @@ const SPORTYBET_TODAY_FIXTURES: LiveFixture[] = [
   { id: 'sb_56', home: 'Carabobo FC', away: 'Mineros de Guayana', competition: 'Venezuela - Copa Venezuela', kickoff: '23:30 GMT', kickoffDate: '2026-10-21T23:30:00Z', status: 'NS', sportyOdd: 1.30 }
 ];
 
+function parseMinuteFromKickoff(kickoffStr: string): number {
+  const match = kickoffStr.match(/(\d{1,2}):(\d{2})/);
+  if (!match) return 0;
+  const hours = parseInt(match[1], 10);
+  const mins = parseInt(match[2], 10);
+  return hours * 60 + mins;
+}
+
 export async function fetchTodaysFixtures(
   startMinute?: number,
   endMinute?: number
 ): Promise<FixtureFetchResult> {
-  void startMinute;
-  void endMinute;
+  const minStart = typeof startMinute === 'number' ? startMinute : 0;
+  const maxEnd = typeof endMinute === 'number' ? endMinute : 1440;
 
-  const fixtures: LiveFixture[] = SPORTYBET_TODAY_FIXTURES.map(f => ({
+  // 1. STRICT TIME WINDOW FILTER
+  const validInWindow = SPORTYBET_TODAY_FIXTURES.filter(f => {
+    const minute = parseMinuteFromKickoff(f.kickoff);
+    if (minStart <= maxEnd) {
+      return minute >= minStart && minute <= maxEnd;
+    }
+    return minute >= minStart || minute <= maxEnd;
+  });
+
+  // 2. RANDOMIZED ORDER SHUFFLE (Fisher-Yates)
+  const shuffled = [...validInWindow];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  const fixtures: LiveFixture[] = shuffled.map(f => ({
     ...f,
     generatedId: f.id,
     teams: {
@@ -99,7 +123,6 @@ export async function fetchTodaysFixtures(
 
   return {
     status: 'available',
-    fixtures,
-    reason: undefined
+    fixtures
   };
 }
