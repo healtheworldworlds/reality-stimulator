@@ -18,6 +18,49 @@ export interface ApiPayload {
 }
 
 const UPSTREAM_TIMEOUT_MS = 8000;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX_REQUESTS = 30;
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(clientId: string, now: number) {
+  for (const [key, entry] of rateLimits.entries()) {
+    if (entry.resetAt <= now) rateLimits.delete(key);
+  }
+  const current = rateLimits.get(clientId);
+  if (!current || current.resetAt <= now) {
+    rateLimits.set(clientId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true, resetAt: now + RATE_LIMIT_WINDOW_MS, remaining: RATE_LIMIT_MAX_REQUESTS - 1 };
+  }
+  if (current.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return { allowed: false, resetAt: current.resetAt, remaining: 0 };
+  }
+  current.count += 1;
+  return { allowed: true, resetAt: current.resetAt, remaining: RATE_LIMIT_MAX_REQUESTS - current.count };
+}
+
+// Comprehensive SportyBet Ghana verified competitions
+const SPORTYBET_LEAGUES_EXPANDED = new Set<number>([
+  // UEFA & International
+  2, 3, 848, 531, 1, 4, 5, 15, 11, 12, 13, 20, 21, 849, 1032,
+  // England
+  39, 40, 41, 42, 45, 48, 46, 50, 51, 52, 47, 54, 55, 683,
+  // Spain
+  140, 141, 143, 435, 436, 437, 438, 439, 440,
+  // Italy
+  135, 136, 137, 138, 715, 716, 717,
+  // Germany
+  78, 79, 81, 82, 83, 84,
+  // France
+  61, 62, 66, 63,
+  // Japan, Asia & Oceania
+  98, 99, 100, 311, 17, 307, 301, 292, 293, 294, 305, 306,
+  // Americas
+  253, 255, 256, 71, 72, 73, 75, 480, 128, 130, 262, 263, 239, 240, 242, 265, 266,
+  // Africa
+  570, 288, 233, 234, 381, 382, 323, 324, 332,
+  // Netherlands, Belgium, Portugal & Rest of Europe
+  88, 89, 90, 144, 145, 94, 95, 96, 203, 204, 179, 180, 119, 120, 103, 113, 218, 207, 197, 345, 328, 118, 106, 333
+]);
 
 export default async function fixturesHandler(request: FixturesRequest, response: FixturesResponse) {
   response.setHeader('Cache-Control', 'public, max-age=120, s-maxage=180, stale-while-revalidate=300');
@@ -31,6 +74,12 @@ export default async function fixturesHandler(request: FixturesRequest, response
   const now = new Date();
   const ghanaDateStr = now.toISOString().slice(0, 10);
   const date = typeof request.query?.date === 'string' ? request.query.date : ghanaDateStr;
+
+  const clientId = (request.headers?.['x-forwarded-for'] as string)?.split(',')[0] || request.socket?.remoteAddress || 'unknown';
+  const limit = checkRateLimit(clientId, Date.now());
+  if (!limit.allowed) {
+    return response.status(429).json({ error: 'Too many requests. Please try again shortly.' });
+  }
 
   const apiKey = process.env.FOOTBALL_API_KEY?.trim();
   if (!apiKey) {
@@ -62,22 +111,43 @@ export default async function fixturesHandler(request: FixturesRequest, response
     const items = payload.response || [];
     const currentTimeMs = Date.now() - 5 * 60 * 1000;
 
-    // Filter out friendlies, youth reserves, and finished games
     const mapped = items
       .filter((item: any) => {
         if (!item?.fixture?.id || !item?.teams?.home?.name || !item?.teams?.away?.name) return false;
-        
-        const leagueName = (item.league?.name || '').toLowerCase();
-        // Exclude youth/women/reserves that SportyBet doesn't list
-        if (leagueName.includes('u19') || leagueName.includes('u20') || leagueName.includes('u21') || leagueName.includes('women') || leagueName.includes('reserve')) {
-          return false;
-        }
 
+        const leagueId = Number(item.league?.id);
+        const leagueName = (item.league?.name || '').toLowerCase();
+
+        // 1. Check if ID matches SportyBet list OR contains recognized tournament keywords
+        const isRecognized = 
+          SPORTYBET_LEAGUES_EXPANDED.has(leagueId) ||
+          leagueName.includes('champions league') ||
+          leagueName.includes('sudamericana') ||
+          leagueName.includes('libertadores') ||
+          leagueName.includes('j1') ||
+          leagueName.includes('j2') ||
+          leagueName.includes('j3') ||
+          leagueName.includes('premier') ||
+          leagueName.includes('liga') ||
+          leagueName.includes('copa') ||
+          leagueName.includes('division') ||
+          leagueName.includes('pokal') ||
+          leagueName.includes('cup');
+
+        if (!isRecognized) return false;
+
+        // 2. Reject internal simulated virtuals (SRL) which have separate odds systems
+        if (leagueName.includes('srl') || leagueName.includes('simulated')) return false;
+
+        // 3. Status must be not started
         const status = item.fixture.status?.short || '';
         const isNotStarted = status === 'NS' || status === 'TBD';
-        const kickoffTimeMs = new Date(item.fixture.date).getTime();
 
-        return isNotStarted && kickoffTimeMs >= currentTimeMs;
+        // 4. Kickoff in future GMT
+        const kickoffTimeMs = new Date(item.fixture.date).getTime();
+        const isFuture = kickoffTimeMs >= currentTimeMs;
+
+        return isNotStarted && isFuture;
       })
       .map((item: any) => {
         const d = new Date(item.fixture.date);
