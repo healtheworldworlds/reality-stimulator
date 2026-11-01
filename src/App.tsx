@@ -284,9 +284,9 @@ function App() {
     void (async () => {
       try {
         const response = await fetch('/api/auth-settings')
-        const payload = await response.json() as { passwordRequired?: boolean, error?: string }
-        if (!response.ok || typeof payload.passwordRequired !== 'boolean') {
-          throw new Error(payload.error ?? `Could not load access settings (HTTP ${response.status}).`)
+        const payload = await response.json().catch(() => null) as { passwordRequired?: boolean, error?: string } | null
+        if (!response.ok || typeof payload?.passwordRequired !== 'boolean') {
+          throw new Error(payload?.error ?? `Could not load access settings (HTTP ${response.status}).`)
         }
         const sessionUnlocked = payload.passwordRequired && sessionStorage.getItem('app_unlocked') === 'true'
         if (active) {

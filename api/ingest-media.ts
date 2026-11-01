@@ -3,7 +3,7 @@
 // Swap stubVisionTranscript for a real OCR engine (Tesseract, a vision API, …) later;
 // extractFixturesFromTranscript is the shared seam that genuine OCR output will use.
 // Access is admin-only: every request must carry a valid x-admin-key header.
-import { isAdminKey } from './admin-auth.ts'
+import { isAdminKey } from './admin-auth.js'
 
 export interface IngestMediaRequest {
   method?: string

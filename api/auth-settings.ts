@@ -1,4 +1,4 @@
-import { isAdminKey, secureEquals } from './admin-auth.ts'
+import { isAdminKey, secureEquals } from './admin-auth.js'
 
 const SETTINGS_KEY = 'reality-simulator:auth-settings'
 
