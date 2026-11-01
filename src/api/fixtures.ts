@@ -22,7 +22,6 @@ export interface FixtureFetchResult {
   reason?: string;
 }
 
-// Audited 1X2 matches starting from 17:00 GMT onward, odds >= 1.70, excluding women and virtuals
 const SPORTYBET_TODAY_1X2: LiveFixture[] = [
   { id: '22105', kickoff: '17:00 GMT', kickoffDate: '2026-11-01T17:00:00Z', status: 'NS', competition: 'Italy - Serie A', home: 'Genoa', away: 'Lecce', marketType: '1X2', selectedOption: '1', sportyOdd: 3.31 },
   { id: '17600', kickoff: '17:00 GMT', kickoffDate: '2026-11-01T17:00:00Z', status: 'NS', competition: 'Czechia - 1. Liga', home: 'Bohemians Prague 1905', away: 'Sparta Prague', marketType: '1X2', selectedOption: '2', sportyOdd: 1.78 },
@@ -111,7 +110,7 @@ const SPORTYBET_TODAY_1X2: LiveFixture[] = [
   { id: '17157', kickoff: '21:30 GMT', kickoffDate: '2026-11-01T21:30:00Z', status: 'NS', competition: 'USA - MLS', home: 'Atlanta United FC', away: 'Toronto FC', marketType: '1X2', selectedOption: '1', sportyOdd: 2.22 },
   { id: '14240', kickoff: '21:30 GMT', kickoffDate: '2026-11-01T21:30:00Z', status: 'NS', competition: 'Venezuela - Primera Division', home: 'Deportivo La Guaira', away: 'Portuguesa FC', marketType: '1X2', selectedOption: '1', sportyOdd: 2.10 },
   { id: '26033', kickoff: '21:30 GMT', kickoffDate: '2026-11-01T21:30:00Z', status: 'NS', competition: 'Argentina - Primera LPF', home: 'CA Belgrano de Cordoba', away: 'CA Barracas Central', marketType: '1X2', selectedOption: '1', sportyOdd: 1.89 },
-  { id: '27924', kickoff: '21:30 GMT', kickoffDate: '2026-11-01T21:30:00Z', status: 'NS', competition: 'Argentina - Primera LPF', home: 'Newell\'s Old Boys', away: 'Union de Santa Fe', marketType: '1X2', selectedOption: '1', sportyOdd: 2.00 },
+  { id: '27924', kickoff: '21:30 GMT', kickoffDate: '2026-11-01T21:30:00Z', status: 'NS', competition: 'Argentina - Primera LPF', home: "Newell's Old Boys", away: 'Union de Santa Fe', marketType: '1X2', selectedOption: '1', sportyOdd: 2.00 },
   { id: '45388', kickoff: '21:30 GMT', kickoffDate: '2026-11-01T21:30:00Z', status: 'NS', competition: 'Brazil - Brasileiro Serie B', home: 'Cuiaba EC MT', away: 'Sao Bernardo FC', marketType: '1X2', selectedOption: '1', sportyOdd: 1.89 },
   { id: '44126', kickoff: '21:30 GMT', kickoffDate: '2026-11-01T21:30:00Z', status: 'NS', competition: 'Brazil - Copa do Brasil', home: 'Gremio FB Porto Alegrense', away: 'Atletico Mineiro MG', marketType: '1X2', selectedOption: '1', sportyOdd: 2.55 },
   { id: '26448', kickoff: '21:30 GMT', kickoffDate: '2026-11-01T21:30:00Z', status: 'NS', competition: 'Argentina - Primera Nacional', home: 'San Martin de Tucuman', away: 'CA Colegiales', marketType: '1X2', selectedOption: '2', sportyOdd: 2.50 },
