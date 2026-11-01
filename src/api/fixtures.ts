@@ -130,7 +130,7 @@ const SPORTYBET_TODAY_1X2: LiveFixture[] = [
   { id: '60608', kickoff: '23:30 GMT', kickoffDate: '2026-11-01T23:30:00Z', status: 'NS', competition: 'Bolivia - Division Profesional', home: 'FC Universitario de Vinto', away: 'Always Ready', marketType: '1X2', selectedOption: '2', sportyOdd: 1.78 }
 ];
 
-export async function fetchTodaysFixtures(): Promise<FixtureFetchResult> {
+export async function fetchTodaysFixtures(start?: any, end?: any): Promise<FixtureFetchResult> {
   const shuffled = [...SPORTYBET_TODAY_1X2];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
