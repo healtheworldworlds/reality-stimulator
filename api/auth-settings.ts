@@ -1,6 +1,5 @@
-import { timingSafeEqual } from 'node:crypto'
+import { isAdminKey, secureEquals } from './admin-auth.ts'
 
-const ADMIN_MASTER_KEY = 'REGINA'
 const SETTINGS_KEY = 'reality-simulator:auth-settings'
 
 type AuthSettings = {
@@ -35,12 +34,6 @@ function bodyRecord(body: unknown): Record<string, unknown> | null {
   return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
     ? parsed as Record<string, unknown>
     : null
-}
-
-function secureEquals(actual: string, expected: string) {
-  const actualBytes = Buffer.from(actual)
-  const expectedBytes = Buffer.from(expected)
-  return actualBytes.length === expectedBytes.length && timingSafeEqual(actualBytes, expectedBytes)
 }
 
 function kvCredentials() {
@@ -118,11 +111,11 @@ export default async function authSettingsHandler(request: AuthRequest, response
 
     if (action === 'verify-master') {
       if (typeof body.masterKey !== 'string') return response.status(400).json({ valid: false })
-      return response.status(200).json({ valid: secureEquals(body.masterKey, ADMIN_MASTER_KEY) })
+      return response.status(200).json({ valid: isAdminKey(body.masterKey) })
     }
 
     if (action === 'update') {
-      if (typeof body.masterKey !== 'string' || !secureEquals(body.masterKey, ADMIN_MASTER_KEY)) {
+      if (!isAdminKey(body.masterKey)) {
         return response.status(401).json({ success: false, error: 'Unauthorized.' })
       }
       if (typeof body.passwordRequired !== 'boolean' || typeof body.newAccessCode !== 'string') {

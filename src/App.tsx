@@ -28,6 +28,7 @@ import { generateKickoffTimes, generateUniqueClubMatchups } from './engine/clubs
 import { formatKickoff, kickoffDateForToday } from './engine/kickoff'
 import { fetchTodaysFixtures, type LiveFixture } from './api/fixtures'
 import { LiveCodesHub } from './LiveCodesHub'
+import { MediaIngestGate } from './MediaIngestGate'
 import { AdminModal, VisitorUnlockModal } from './AdminModal'
 import './App.css'
 
@@ -583,6 +584,53 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
     setStatus(`${home} v ${away} added to the fixture board and round lineup.`)
   }
 
+  function addIngestedFixtures(liveFixtures: LiveFixture[], fileName: string) {
+    const remaining = MAX_FIXTURE_POOL_SIZE - fixturePool.length
+    if (remaining <= 0) {
+      setStatus(`The fixture pool is limited to ${MAX_FIXTURE_POOL_SIZE} matches.`)
+      return
+    }
+    const seen = new Set(fixturePool.map((fixture) => fixture.id))
+    const mapped: Fixture[] = []
+    for (const live of liveFixtures) {
+      const id = `ingest-${live.id}`
+      if (seen.has(id)) continue
+      seen.add(id)
+      const odds: Record<Market, number> = { ...DEFAULT_CUSTOM_ODDS }
+      if (typeof live.sportyOdd === 'number' && live.sportyOdd >= 1.01) {
+        if (live.marketType === 'Over1.5') odds.over15 = live.sportyOdd
+        else if (live.marketType === 'Over2.5') odds.over25 = live.sportyOdd
+        else if (live.marketType === '1X2') {
+          if (live.selectedOption === '2') odds.away = live.sportyOdd
+          else if (live.selectedOption === 'X') odds.draw = live.sportyOdd
+          else odds.home = live.sportyOdd
+        }
+      }
+      mapped.push({
+        id,
+        competition: live.competition || 'Imported fixture',
+        kickoff: live.kickoff || 'Kickoff TBD',
+        kickoffDate: live.kickoffDate,
+        home: live.home,
+        away: live.away,
+        homePrior: 1.65,
+        awayPrior: 1.15,
+        homeRecent: 1.65,
+        awayRecent: 1.15,
+        recentAgeDays: 0,
+        odds,
+      })
+      if (mapped.length >= remaining) break
+    }
+    if (mapped.length === 0) {
+      setStatus(`No new matches found in ${fileName}; extracted matches are already on the fixture board.`)
+      return
+    }
+    setFixturePool((current) => [...current, ...mapped])
+    setRoundFixtureIds((current) => [...current, ...mapped.map((fixture) => fixture.id)])
+    setStatus(`${mapped.length} match${mapped.length === 1 ? '' : 'es'} scanned from ${fileName} added to the fixture board and round lineup.`)
+  }
+
   function renderMarkets(fixture: (typeof preparedFixtures)[number]) {
     return marketGroups[activeGroup].markets.map((market) => {
       const probability = selectionProbability(fixture.probabilities, market)
@@ -782,6 +830,10 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
             </form>
             <p className="market-generator__note">Uses today’s API-Football fixtures in UTC when available. If the API is unavailable, registry fallback pairings and kickoff times are illustrative, not scheduled fixtures.</p>
             {marketGeneratorSummary && <p className={`market-generator__summary${marketGeneratorSummary.startsWith('The model could not') || marketGeneratorSummary.startsWith('Choose') || marketGeneratorSummary.startsWith('Enter') ? ' is-error' : ''}`} role="status" aria-live="polite">{marketGeneratorSummary}</p>}
+            <div className="market-generator__ingest">
+              <p className="market-generator__divider"><span>or scan a screenshot / video</span></p>
+              <MediaIngestGate onFixtures={addIngestedFixtures} />
+            </div>
           </section>
 
           <section className="slip-section" aria-labelledby="slip-heading">

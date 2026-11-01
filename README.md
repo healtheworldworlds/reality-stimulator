@@ -28,6 +28,12 @@ The Automated Match Generator requests today's fixtures from the same-origin `/a
 
 The endpoint's rate limit and cache are in-memory best-effort protections and may reset when serverless instances restart or scale. Use a shared store such as Redis/KV if a deployment needs globally coordinated limits or caching.
 
+## Media ingestion
+
+The Automated Market Generator also includes a dropzone that accepts a SportyBet screenshot or screen recording from the device. The scanner is admin-only: the dropzone stays locked until the admin key is entered, and `/api/ingest-media` rejects requests without a valid `x-admin-key` header with `401`. The key is verified once via `/api/auth-settings?action=verify-master`, held only in browser memory (never localStorage), and sent as a header on each upload.
+
+The file is posted as `multipart/form-data` to the same-origin `/api/ingest-media` Vercel serverless endpoint (field name `media`, images and videos up to 25 MB). The endpoint runs a two-stage pipeline: a vision stage that turns media into text, then `extractFixturesFromTranscript`, which parses SportyBet IDs, kickoff times, team names and odds into structured fixtures. The vision stage is currently a deterministic stub (`stubVisionTranscript`); replace it with a real OCR/vision engine later — the parser is shared and already final. To exercise the parser directly, post a `text` form field instead of a file. Extracted matches are added to the fixture board and the round lineup. Use `vercel dev` to run the endpoint locally; the hosting platform's request-body limit (~4.5 MB on the Vercel Hobby plan) applies before the function runs.
+
 ## Prototype inputs
 
 Fixture rates and bookmaker odds are illustrative model values, not prices supplied by API-Football. The half-life control blends recent-form example rates against their priors. The fixture board contains static examples; the Automated Match Generator can use today's API-Football fixtures when available and otherwise uses unscheduled registry pairings. Add a fixture from the board to the round lineup, or add a custom fixture directly; both can remain selected across consecutive rounds.
@@ -40,7 +46,8 @@ Add custom fixtures above the fixture board. Home/draw/away prices are entered e
 
 ## Security notes
 
-- Optional visitor password protection is managed through the hidden developer-badge admin control and `/api/auth-settings`. The requested `REGINA` master key is hard-coded for this prototype and is not suitable as a production secret; replace it with a server-only environment secret before relying on admin access.
+- Optional visitor password protection is managed through the hidden developer-badge admin control and `/api/auth-settings`. The requested `REGINA` master key is hard-coded in `api/admin-auth.ts` (shared by `/api/auth-settings` and `/api/ingest-media`) and is not suitable as a production secret; replace it with a server-only environment secret before relying on admin access.
+- Local scratch scripts, captured API dumps and session files (including SportyBet cookies) live in the git-ignored `.sandbox/` folder. Never commit `.sandbox/` contents or real session credentials.
 - Authentication settings use Vercel KV/Upstash when `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`) are configured. Without these bindings settings are stored in per-instance memory and may reset or differ across serverless instances.
 - Vite exposes `VITE_`-prefixed environment variables to browser code. Treat every such variable as public; the API-Football credential is server-only as `FOOTBALL_API_KEY`.
 - Rates, ρ, half-life, odds and simulation dimensions have engine-side bounds. Monte Carlo runs are capped at 100,000, with total fixture/pick trial budgets, and execute in a module Web Worker.

@@ -28,3 +28,6 @@ lerna-debug.log*
 *.sln
 *.sw?
 generated_codes.txt
+
+# Local scratch scripts, captured outputs and session dumps (never commit)
+.sandbox/
