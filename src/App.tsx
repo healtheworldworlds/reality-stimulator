@@ -125,9 +125,9 @@ function currentUtcClockTime() {
   return new Date().toISOString().slice(11, 16)
 }
 
-function selectLiveFixtures(fixtures: LiveFixture[], count: number, market: string) {
+function selectLiveFixtures(fixtures: LiveFixture[], count: number, market: string, enforceNoThreePlusScoringStreak: boolean) {
   const goalMarket = ['over15', 'over25', 'secondHalfHighest'].includes(market)
-  const eligible = goalMarket
+  const eligible = goalMarket && enforceNoThreePlusScoringStreak
     ? fixtures.filter((fixture) =>
       fixture.streakDataAvailable &&
       typeof fixture.homeScoringStreak === 'number' &&
@@ -357,6 +357,7 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
   const [fixtureBoardOpen, setFixtureBoardOpen] = useState(false)
   const [activeGroup, setActiveGroup] = useState<keyof typeof marketGroups>('result')
   const [generatorMarket, setGeneratorMarket] = useState<AutomatedMarket>('over15')
+  const [noTeamScoresMoreThanThree, setNoTeamScoresMoreThanThree] = useState(true)
   const [roundMarket, setRoundMarket] = useState<AutomatedMarket>('over15')
   const [matchCount, setMatchCount] = useState('17')
   const [minimumOdds, setMinimumOdds] = useState('1.30')
@@ -453,8 +454,18 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
     try {
       const liveResult = await fetchTodaysFixtures(start, end)
       const liveMatchups = liveResult.status === 'available'
-        ? selectLiveFixtures(liveResult.fixtures, count, generatorMarket)
+        ? selectLiveFixtures(liveResult.fixtures, count, generatorMarket, noTeamScoresMoreThanThree)
         : []
+      if (noTeamScoresMoreThanThree && liveMatchups.length < count) {
+        setMarketGeneratorSummary(
+          `No Team Scores More Than 3: only ${liveMatchups.length} verified fixture${liveMatchups.length === 1 ? '' : 's'} met the streak rule. No unverified or registry fallback matches were added.`,
+        )
+        setGeneratedFixtures([])
+        setRoundFixtureIds([])
+        setRoundResults(new Map())
+        setRoundNumber(0)
+        return
+      }
       const useLiveFixtures = liveMatchups.length > 0
       const fallbackKickoffTimes = useLiveFixtures ? [] : generateKickoffTimes(count, start, end)
       const matchups: Array<{ competition: string; home: string; away: string; kickoff: string; kickoffDate: string; generatedId: string }> = useLiveFixtures
@@ -803,6 +814,17 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
                   <option value="secondHalfHighest">Second Half Highest Scoring</option>
                   <option value="over25">Over 2.5 Goals</option>
                 </select>
+              </label>
+              <label className="market-generator__rule">
+                <input
+                  type="checkbox"
+                  checked={noTeamScoresMoreThanThree}
+                  onChange={(event) => setNoTeamScoresMoreThanThree(event.target.checked)}
+                />
+                <span>
+                  <strong>No team to score more than 3 goals in a row</strong>
+                  <small>Exclude matches without verified streak data.</small>
+                </span>
               </label>
               <label className="form-field">
                 <span>Match count</span>
