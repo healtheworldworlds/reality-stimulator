@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 
-type Bookie = 'sportybet' | 'betway'
-
 type LiveCode = {
   id: string
   code: string
   odds: number | null
   time: string
-  bookie: Bookie
+  bookie: 'sportybet'
   channel: string
-  countryCode?: 'GHANA' | 'NIGERIA'
+  countryCode?: 'GHANA'
   source?: 'telegram' | 'generated'
   legs?: Array<{ market: string; pick: string; odds: number }>
 }
@@ -20,13 +18,7 @@ type FeedPayload = {
   error?: string
   updatedAt?: string
   sportybet?: LiveCode[]
-  betway?: LiveCode[]
   warnings?: string[]
-}
-
-const BOOKIES: Record<Bookie, { label: string }> = {
-  sportybet: { label: 'SportyBet GH' },
-  betway: { label: 'Betway' },
 }
 
 function relativeTime(iso: string, now: number) {
@@ -39,7 +31,6 @@ function relativeTime(iso: string, now: number) {
 }
 
 export function LiveCodesHub() {
-  const [bookie, setBookie] = useState<Bookie>('sportybet')
   const [feed, setFeed] = useState<FeedPayload | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -94,8 +85,8 @@ export function LiveCodesHub() {
     }
   }
 
-  const items = feed?.[bookie] ?? []
-  const meta = BOOKIES[bookie]
+  const items = (feed?.sportybet ?? []).filter((item) =>
+    item.bookie === 'sportybet' && (item.countryCode ?? 'GHANA') === 'GHANA')
 
   return (
     <section className="live-codes" aria-labelledby="live-codes-heading">
@@ -103,12 +94,8 @@ export function LiveCodesHub() {
         <div><p className="eyebrow">Community feed</p><h2 id="live-codes-heading">Live community booking codes</h2></div>
       </div>
       <div className="live-codes__toolbar">
-        <div className="live-codes__tabs" role="group" aria-label="Bookmaker">
-          {(Object.keys(BOOKIES) as Bookie[]).map((key) => (
-            <button key={key} type="button" className={`live-codes__tab${bookie === key ? ' is-active' : ''}`} aria-pressed={bookie === key} onClick={() => setBookie(key)}>
-              {BOOKIES[key].label}
-            </button>
-          ))}
+        <div className="live-codes__tabs" aria-label="Country and bookmaker">
+          <span className="live-codes__tab is-active">SportyBet GH</span>
         </div>
         <button className="quiet-button" type="button" onClick={() => void refresh()} disabled={loading}>
           <RefreshCw size={12} className={loading ? 'is-spinning' : undefined} /> Refresh Feed
@@ -118,10 +105,10 @@ export function LiveCodesHub() {
         <input type="checkbox" checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} />
         Auto-refresh every 60 seconds
       </label>
-      <p className="live-codes__guide">Works with all SportyBet codes (NG, KE, GH, UG) and Betway.</p>
+      <p className="live-codes__guide">Available booking codes for SportyBet Ghana (GH) only.</p>
       {error && <p className="live-codes__error" role="alert">{error}</p>}
       {feed?.warnings?.map((warning) => <p className="live-codes__warning" key={warning}>Some channels could not refresh: {warning}</p>)}
-      {!error && !loading && items.length === 0 && <p className="live-codes__empty">No {meta.label} codes found right now.</p>}
+      {!error && !loading && items.length === 0 && <p className="live-codes__empty">No SportyBet GH codes found right now.</p>}
       <ul className="live-codes__list">
         {items.map((item) => (
           <li className="live-code" key={item.id}>

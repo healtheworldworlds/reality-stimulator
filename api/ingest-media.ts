@@ -438,6 +438,14 @@ export default async function ingestMediaHandler(request: IngestMediaRequest, re
     source = 'ocr-text'
   }
 
+  if (/betway|\bnigeria\b|\bnigerian\b|\bkenya\b|\bk e\b|\buganda\b|\b(?:ng|ke|ug)\b/i.test(transcript)) {
+    return response.status(422).json({
+      status: 'error',
+      error: 'Only Ghana SportyBet (GH) media and fixtures are accepted.',
+      transcript: '',
+    })
+  }
+
   const fixtures = extractFixturesFromTranscript(transcript)
   if (fixtures.length === 0) {
     return response.status(422).json({ status: 'error', error: 'No fixtures could be extracted from the media.', transcript })

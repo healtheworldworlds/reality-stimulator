@@ -118,7 +118,11 @@ export async function resolvePickKey(pick, candidates) {
 
 export async function assertTargetBookieSupported() {
   const payload = await supportedBookies();
-  findSupported(payload, [TARGET_BOOKIE, 'sportybet gh', 'sportybetghana'], TARGET_BOOKIE);
+  const ghItems = items(payload).filter((item) => {
+    const keys = itemKeys(item).map(normalize)
+    return keys.some((key) => key.includes('sportybet') && (key.includes('gh') || key.includes('ghana')))
+  })
+  if (ghItems.length === 0) throw new Error(`ConvertBetCodes does not support ${TARGET_BOOKIE}.`)
 }
 
 export async function generateBetCode(legs) {

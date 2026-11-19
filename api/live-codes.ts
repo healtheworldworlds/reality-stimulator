@@ -1,6 +1,6 @@
 import { isAdminKey } from './admin-auth.js'
 
-type Bookie = 'sportybet' | 'betway'
+type Bookie = 'sportybet'
 
 type LiveCode = {
   id: string
@@ -27,20 +27,15 @@ type CodesResponse = {
   json(body: unknown): CodesResponse
 }
 
-type CountryCode = 'GHANA' | 'NIGERIA'
+type CountryCode = 'GHANA'
 
 const DEFAULT_COUNTRY: CountryCode = 'GHANA'
 
 const SOURCE_CONFIG: Array<{ channel: string, country: CountryCode }> = [
   { channel: 'sportybet_gh', country: 'GHANA' },
   { channel: 'SportybetOfficialChannel', country: 'GHANA' },
-  { channel: 'bookingcodes', country: 'NIGERIA' },
-  { channel: 'sportybet_nigeria_codes', country: 'NIGERIA' },
-  { channel: 'sportybet_codes_free', country: 'NIGERIA' },
 ]
 const CHANNELS = SOURCE_CONFIG.map((source) => source.channel)
-// Channels whose unlabeled codes are not assumed to be SportyBet
-const MIXED_CHANNELS = new Set(['betway_sporty_codes'])
 const CACHE_TTL_MS = 60_000
 const MAX_PER_BOOKIE = 30
 const STOP_WORDS = new Set([
@@ -55,7 +50,6 @@ type FeedBody = {
   success: true
   updatedAt: string
   sportybet: LiveCode[]
-  betway: LiveCode[]
   warnings?: string[]
 }
 
@@ -92,7 +86,10 @@ async function readGeneratedCodes() {
     if (typeof item !== 'string') return []
     try {
       const parsed = JSON.parse(item) as LiveCode
-      return parsed.code ? [parsed] : []
+      const valid = parsed.code &&
+        parsed.bookie === 'sportybet' &&
+        parsed.countryCode === 'GHANA'
+      return valid ? [parsed] : []
     } catch {
       return []
     }
@@ -115,6 +112,11 @@ function parseBody(body: unknown): Record<string, unknown> | null {
 
 async function storeGeneratedCode(body: Record<string, unknown>) {
   const code = typeof body.code === 'string' ? body.code.toUpperCase() : ''
+  const countryCode = typeof body.countryCode === 'string' ? body.countryCode.toUpperCase() : 'GHANA'
+  const bookie = typeof body.bookie === 'string' ? body.bookie.toLowerCase() : 'sportybet'
+  if (bookie !== 'sportybet' || countryCode !== 'GHANA') {
+    throw new Error('Only SportyBet Ghana (GH) codes can be stored.')
+  }
   const time = typeof body.time === 'string' && Number.isFinite(Date.parse(body.time))
     ? new Date(body.time).toISOString()
     : new Date().toISOString()
@@ -168,7 +170,7 @@ function isValidExplicitCode(value: string) {
   return /^[A-Z0-9]{6,8}$/i.test(value) && !STOP_WORDS.has(value.toUpperCase())
 }
 
-function extractCodes(text: string, channel: string): Array<{ bookie: Bookie, code: string }> {
+function extractCodes(text: string): Array<{ bookie: Bookie, code: string }> {
   const found = new Map<string, Bookie>()
   const explicitTokens = [
     ...text.matchAll(/shareCode=([A-Z0-9]{6,8})/gi),
@@ -184,15 +186,8 @@ function extractCodes(text: string, channel: string): Array<{ bookie: Bookie, co
     const code = rawCode.toUpperCase()
     if (explicit ? !isValidExplicitCode(code) : !isValidCode(code)) continue
     const before = text.slice(Math.max(0, index - 40), index)
-    const labeledBetway = /betway/i.test(before)
     const labeledSportyBet = /sporty\s*bet/i.test(before)
-    let bookie: Bookie | null = null
-    if (/^BW[A-Z0-9]{6,8}$/.test(code) || (labeledBetway && code.length >= 7)) {
-      bookie = 'betway'
-    } else if (labeledSportyBet || (code.length <= 8 && !MIXED_CHANNELS.has(channel.toLowerCase()))) {
-      bookie = 'sportybet'
-    }
-    if (bookie) found.set(code, bookie)
+    if (labeledSportyBet || code.length <= 8) found.set(code, 'sportybet')
   }
   return [...found].map(([code, bookie]) => ({ code, bookie }))
 }
@@ -215,7 +210,7 @@ async function fetchChannel(channel: string): Promise<LiveCode[]> {
     if (Date.now() - postTime > MAX_CODE_AGE_MS) continue
     const text = htmlToText(body).trim()
     const odds = findOdds(text)
-    for (const { bookie, code } of extractCodes(`${body} ${text}`, channel)) {
+    for (const { bookie, code } of extractCodes(`${body} ${text}`)) {
       codes.push({ id: `${post}:${bookie}:${code}`, code, odds, time: new Date(postTime).toISOString(), bookie, channel, countryCode, source: 'telegram' })
     }
   }
@@ -256,7 +251,6 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
       success: true as const,
       updatedAt: new Date(now).toISOString(),
       sportybet: [],
-      betway: [],
       warnings,
     })
   }
@@ -276,13 +270,14 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
   } catch {
     generated = generatedMemory
   }
+  generated = generated.filter((item) =>
+    item.bookie === 'sportybet' && item.countryCode === 'GHANA')
   const body = {
     success: true as const,
     updatedAt: new Date(now).toISOString(),
     sportybet: [...generated, ...newestFirst.filter((item) => item.bookie === 'sportybet')]
       .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
       .slice(0, MAX_PER_BOOKIE),
-    betway: newestFirst.filter((item) => item.bookie === 'betway').slice(0, MAX_PER_BOOKIE),
     ...(warnings.length > 0 ? { warnings } : {}),
   }
   cached = { expiresAt: now + CACHE_TTL_MS, body }
