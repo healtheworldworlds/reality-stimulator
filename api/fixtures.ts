@@ -12,6 +12,14 @@ export interface FixturesResponse {
   };
 }
 
+function nonNegativeInteger(...values: unknown[]): number | undefined {
+  const value = values.find((candidate) =>
+    (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0) ||
+    (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())),
+  );
+  return value === undefined ? undefined : Number(value);
+}
+
 const UPSTREAM_TIMEOUT_MS = 10000;
 
 export default async function fixturesHandler(request: FixturesRequest, response: FixturesResponse) {
@@ -30,17 +38,21 @@ export default async function fixturesHandler(request: FixturesRequest, response
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 
-    const upstream = await fetch(sportyUrl, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.sportybet.com/gh/m/sport/football',
-        'Origin': 'https://www.sportybet.com'
-      },
-      signal: controller.signal
-    });
-    clearTimeout(timer);
+    let upstream: Response;
+    try {
+      upstream = await fetch(sportyUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://www.sportybet.com/gh/m/sport/football',
+          'Origin': 'https://www.sportybet.com'
+        },
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!upstream.ok) {
       return response.status(502).json({ status: 'fallback', error: `SportyBet returned ${upstream.status}` });
@@ -59,6 +71,18 @@ export default async function fixturesHandler(request: FixturesRequest, response
             const d = new Date(startMs);
             const hours = String(d.getUTCHours()).padStart(2, '0');
             const mins = String(d.getUTCMinutes()).padStart(2, '0');
+            const homeScoringStreak = nonNegativeInteger(
+              e.homeScoringStreak,
+              e.homeGoalStreak,
+              e.homeTeam?.scoringStreak,
+              e.homeTeam?.goalStreak,
+            );
+            const awayScoringStreak = nonNegativeInteger(
+              e.awayScoringStreak,
+              e.awayGoalStreak,
+              e.awayTeam?.scoringStreak,
+              e.awayTeam?.goalStreak,
+            );
 
             let over15Odd = 0;
             for (const m of (e.markets || [])) {
@@ -78,6 +102,9 @@ export default async function fixturesHandler(request: FixturesRequest, response
               home: e.homeTeamName || 'Home',
               away: e.awayTeamName || 'Away',
               sportyOdd: over15Odd > 0 ? over15Odd : undefined,
+              ...(homeScoringStreak !== undefined && awayScoringStreak !== undefined
+                ? { homeScoringStreak, awayScoringStreak, streakDataAvailable: true }
+                : {}),
               teams: {
                 home: e.homeTeamName || 'Home',
                 away: e.awayTeamName || 'Away'

@@ -9,6 +9,9 @@
   marketType?: '1X2' | 'Over1.5' | 'Over2.5' | 'SHH';
   selectedOption?: '1' | 'X' | '2';
   sportyOdd?: number;
+  homeScoringStreak?: number;
+  awayScoringStreak?: number;
+  streakDataAvailable?: boolean;
   generatedId?: string;
   teams?: {
     home: string;
@@ -130,7 +133,13 @@ const SPORTYBET_TODAY_1X2: LiveFixture[] = [
   { id: '60608', kickoff: '23:30 GMT', kickoffDate: '2026-11-01T23:30:00Z', status: 'NS', competition: 'Bolivia - Division Profesional', home: 'FC Universitario de Vinto', away: 'Always Ready', marketType: '1X2', selectedOption: '2', sportyOdd: 1.78 }
 ];
 
-export async function fetchTodaysFixtures(_start?: any, _end?: any): Promise<FixtureFetchResult> {
+type FixturesApiResponse = {
+  status?: 'available' | 'fallback'
+  response?: LiveFixture[]
+  error?: string
+}
+
+function staticFallback(reason: string): FixtureFetchResult {
   const shuffled = [...SPORTYBET_TODAY_1X2];
   for (let i = shuffled.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -148,6 +157,21 @@ export async function fetchTodaysFixtures(_start?: any, _end?: any): Promise<Fix
 
   return {
     status: 'available',
-    fixtures
+    fixtures,
+    reason
   };
+}
+
+export async function fetchTodaysFixtures(_start?: unknown, _end?: unknown): Promise<FixtureFetchResult> {
+  try {
+    const response = await fetch('/api/fixtures', { headers: { Accept: 'application/json' } })
+    const payload = await response.json().catch(() => null) as FixturesApiResponse | null
+    if (response.ok && payload?.status === 'available' && Array.isArray(payload.response)) {
+      return { status: 'available', fixtures: payload.response }
+    }
+    if (payload?.error) return staticFallback(payload.error)
+    return staticFallback(`Fixture service unavailable (HTTP ${response.status}).`)
+  } catch (error) {
+    return staticFallback(error instanceof Error ? error.message : 'Fixture service unavailable.')
+  }
 }

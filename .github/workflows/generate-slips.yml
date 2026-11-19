@@ -12,6 +12,8 @@ on:
           - OVER_1_5
           - OVER_2_5
           - 2H_HIGHEST
+          - 1X2
+          - GG_NG
       legs:
         description: 'Legs per slip'
         required: true
@@ -43,8 +45,12 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run Match Automation Script
+        env:
+          CONVERTBETCODES_API_KEY: ${{ secrets.CONVERTBETCODES_API_KEY }}
+          LIVE_CODES_ENDPOINT: ${{ secrets.LIVE_CODES_ENDPOINT }}
+          LIVE_CODES_ADMIN_KEY: ${{ secrets.ADMIN_MASTER_KEY }}
         run: |
-          node scripts/generate-slips.js --market=${{ github.event.inputs.market }} --legs=${{ github.event.inputs.legs }} --slips=${{ github.event.inputs.slips }}
+          node scripts/generate-slips.js --market=${{ inputs.market }} --legs=${{ inputs.legs }} --slips=${{ inputs.slips }}
 
       - name: Upload Generated Codes
         uses: actions/upload-artifact@v4

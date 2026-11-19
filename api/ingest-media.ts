@@ -28,6 +28,9 @@ interface LiveFixture {
   marketType?: '1X2' | 'Over1.5' | 'Over2.5' | 'SHH'
   selectedOption?: '1' | 'X' | '2'
   sportyOdd?: number
+  homeScoringStreak?: number
+  awayScoringStreak?: number
+  streakDataAvailable?: boolean
   generatedId?: string
   teams?: { home: string; away: string }
 }

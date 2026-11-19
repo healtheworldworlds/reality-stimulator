@@ -1,5 +1,7 @@
 ﻿import { chromium, devices } from 'playwright';
 import fs from 'fs';
+import { assertTargetBookieSupported, generateBetCode, resolveMarketKeys, resolvePickKey, TARGET_BOOKIE } from './convert-bet-codes.js';
+import { filterCandidate, marketCandidates, pickCandidates, readCardCandidate } from './slip-filter.js';
 
 const args = process.argv.slice(2);
 const getArg = (key, fallback) => {
@@ -10,11 +12,78 @@ const getArg = (key, fallback) => {
 const LEGS = parseInt(getArg('legs', '14'), 10);
 const SLIPS = parseInt(getArg('slips', '7'), 10);
 const DAY = getArg('day', 'Today'); // 'Today' or 'Tomorrow'
+const MARKET = getArg('market', 'OVER_1_5');
 const OUT_FILE = 'generated_codes.txt';
+const MARKET_LABELS = {
+  OVER_1_5: 'Over 1.5',
+  OVER_2_5: 'Over 2.5',
+  '2H_HIGHEST': '2nd Half Highest',
+  '1X2': '1X2',
+  GG_NG: 'GG/NG'
+};
+
+if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1 || !MARKET_LABELS[MARKET]) {
+  throw new Error('Expected positive --legs and --slips values and a supported --market.');
+}
 
 (async () => {
-  console.log(`Starting Stable Slip Generator: Day=${DAY}, Legs=${LEGS}, Slips=${SLIPS}...`);
-  const browser = await chromium.launch({ headless: false, slowMo: 70 });
+  console.log(`Starting Stable Slip Generator: Day=${DAY}, Market=${MARKET}, Legs=${LEGS}, Slips=${SLIPS}...`);
+  let marketKeys;
+  try {
+    await assertTargetBookieSupported();
+    marketKeys = await resolveMarketKeys({ [MARKET]: marketCandidates(MARKET) });
+  } catch (error) {
+    console.error(`ConvertBetCodes preflight failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
+  const pickKeys = new Map();
+  const resolvePick = async (rawPick) => {
+    const cacheKey = `${MARKET}:${rawPick}`;
+    if (!pickKeys.has(cacheKey)) {
+      pickKeys.set(cacheKey, await resolvePickKey(rawPick, pickCandidates(MARKET, rawPick)));
+    }
+    return pickKeys.get(cacheKey);
+  };
+  const filterReasons = new Map();
+  const recordFilter = (reason) => filterReasons.set(reason, (filterReasons.get(reason) ?? 0) + 1);
+  const publishCode = async (code, legs, slipNumber) => {
+    const endpoint = process.env.LIVE_CODES_ENDPOINT?.trim();
+    if (!endpoint) {
+      console.warn('LIVE_CODES_ENDPOINT is not configured; generated code will remain in the artifact only.');
+      return;
+    }
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'x-admin-key': process.env.LIVE_CODES_ADMIN_KEY ?? '',
+      },
+      body: JSON.stringify({
+        code,
+        bookie: 'sportybet',
+        countryCode: 'GHANA',
+        channel: 'reality-simulator',
+        source: 'generated',
+        time: new Date().toISOString(),
+        legs,
+        slipNumber,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error ?? `Live code persistence failed (HTTP ${response.status}).`);
+  };
+  fs.writeFileSync(OUT_FILE, '');
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: process.env.HEADFUL !== '1', slowMo: process.env.CI ? 0 : 70 });
+  } catch (error) {
+    console.error(`Could not launch Playwright: ${error instanceof Error ? error.message : String(error)}`);
+    process.exitCode = 1;
+    return;
+  }
   const context = await browser.newContext({
     ...devices['iPhone 13'],
     locale: 'en-GH',
@@ -60,19 +129,34 @@ const OUT_FILE = 'generated_codes.txt';
         }
       } catch (_) {}
 
-      // 4. Switch to O/U market tab
-      try {
-        const ouTab = page.locator('.m-market-tab, span, div').filter({ hasText: /^O\/U$/i }).first();
-        if (await ouTab.isVisible({ timeout: 4000 })) {
-          await ouTab.click({ force: true });
-          await page.waitForTimeout(1500);
+      // 4. Switch to the requested market tab
+      if (MARKET !== '1X2') try {
+        const marketTab = page.locator('.m-market-tab, span, div').filter({ hasText: new RegExp(
+          MARKET === '2H_HIGHEST' ? '2nd Half|2H' : 'O\\/U|GG\\/NG',
+          'i'
+        ) }).first();
+        await marketTab.waitFor({ state: 'visible', timeout: 4000 });
+        await marketTab.click({ force: true });
+        await page.waitForTimeout(1500);
+      } catch (error) {
+        throw new Error(`Could not select ${MARKET_LABELS[MARKET]} market: ${error.message}`);
+      }
+
+      if (MARKET !== '2H_HIGHEST') {
+        const targetMarket = MARKET === 'OVER_2_5' ? '2.5' : MARKET === 'OVER_1_5' ? '1.5' : 'GG|NG';
+        const marketFilter = page.locator('span, div, li').filter({ hasText: new RegExp(`^(${targetMarket})$`, 'i') }).first();
+        await marketFilter.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
+        if (await marketFilter.isVisible().catch(() => false)) {
+          await marketFilter.click({ force: true });
+          await page.waitForTimeout(1000);
         }
-      } catch (_) {}
+      }
 
       // 5. Gather unique matches
       const pickedMatchIds = new Set();
       let scrollAttempts = 0;
 
+      const selectedLegs = [];
       while (pickedMatchIds.size < LEGS && scrollAttempts < 45) {
         const cards = await page.locator('[data-key]:has(.m-event-sport)').all();
         const shuffled = cards.sort(() => 0.5 - Math.random());
@@ -88,11 +172,28 @@ const OUT_FILE = 'generated_codes.txt';
               const btn = oddsButtons[Math.floor(Math.random() * oddsButtons.length)];
               const oddsText = await btn.innerText().catch(() => '');
               const odds = parseFloat(oddsText.trim());
+              const rawPick = (await btn.getAttribute('data-pick').catch(() => null)) ||
+                (await btn.getAttribute('data-outcome').catch(() => null)) || oddsText.trim();
 
               if (!isNaN(odds) && odds >= 1.05) {
+                const candidate = await readCardCandidate(card, MARKET, rawPick, odds);
+                const filterResult = filterCandidate(candidate, MARKET);
+                if (!filterResult.accepted) {
+                  recordFilter(filterResult.reason);
+                  continue;
+                }
+                const pickKey = await resolvePick(rawPick);
                 await btn.scrollIntoViewIfNeeded().catch(() => {});
-                await btn.click({ force: true }).catch(() => {});
+                await btn.click({ force: true });
                 pickedMatchIds.add(cardId);
+                selectedLegs.push({
+                  event_id: cardId,
+                  home_team: candidate.teams?.[0] ?? '',
+                  away_team: candidate.teams?.[1] ?? '',
+                  market: marketKeys[MARKET],
+                  pick: pickKey,
+                  odds,
+                });
                 console.log(`[Slip ${s}/${SLIPS}] Picked match ${pickedMatchIds.size}/${LEGS} (Odds: ${odds})`);
                 await page.waitForTimeout(200);
               }
@@ -109,55 +210,23 @@ const OUT_FILE = 'generated_codes.txt';
 
       console.log(`[Slip ${s}/${SLIPS}] Total matches gathered: ${pickedMatchIds.size}/${LEGS}`);
 
-      if (pickedMatchIds.size >= LEGS) {
-        // Dismiss tooltips
-        await page.evaluate(() => {
-          document.querySelectorAll('.m-popover, .m-tooltip, [class*="early-goals"]').forEach(el => el.remove());
-        }).catch(() => {});
-        await page.waitForTimeout(300);
-
-        // Open betslip
-        await page.mouse.click(335, 710);
-        await page.waitForTimeout(2000);
-
-        // Click Book Bet
-        console.log(`Booking Slip ${s}/${SLIPS}...`);
-        await page.evaluate(() => {
-          const btn = document.querySelector('.m-book-btn') || 
-                      document.querySelector('[data-op="book-bet"]') ||
-                      Array.from(document.querySelectorAll('div, button, span')).find(el => el.textContent && el.textContent.trim().toLowerCase() === 'book bet');
-          if (btn) btn.click();
-        });
-        await page.waitForTimeout(3500);
-
-        // Read Code
-        let code = '';
-        const codeElement = page.locator('.m-booking-code-body, .m-booking-code, .share-code').first();
-        if (await codeElement.isVisible({ timeout: 5000 }).catch(() => false)) {
-          const raw = await codeElement.innerText().catch(() => '');
-          const match = raw.match(/([A-Z0-9]{6,7})/);
-          if (match) code = match[1];
-        }
-
-        if (!code) {
-          const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
-          const match = bodyText.match(/Booking Code\s*[:\-]?\s*([A-Z0-9]{6,7})/i) || bodyText.match(/Code\s*[:\-]?\s*([A-Z0-9]{6,7})/i);
-          if (match) code = match[1];
-        }
-
-        const cleanCode = code || 'BOOKED';
-        const entry = `[Slip ${s}/${SLIPS}] Code: ${cleanCode} | Day: ${DAY} | Legs: ${LEGS}`;
-        console.log(`\n==========================================`);
-        console.log(`SUCCESS: ${entry}`);
-        console.log(`==========================================\n`);
-        fs.appendFileSync(OUT_FILE, entry + '\n');
-
-        await page.waitForTimeout(1500);
+      if (pickedMatchIds.size < LEGS) {
+        throw new Error(`Could only gather ${pickedMatchIds.size}/${LEGS} matches for slip ${s}.`);
       }
+
+      if (selectedLegs.length !== LEGS) throw new Error(`Slip ${s} has ${selectedLegs.length}/${LEGS} structured legs.`);
+      console.log(`Generating ConvertBetCodes slip ${s}/${SLIPS} for ${TARGET_BOOKIE}...`);
+      const { code } = await generateBetCode(selectedLegs);
+      await publishCode(code, selectedLegs, s);
+      const entry = `[Slip ${s}/${SLIPS}] Code: ${code} | Bookie: ${TARGET_BOOKIE} | Day: ${DAY} | Market: ${MARKET} | Legs: ${LEGS}`;
+      console.log(`SUCCESS: ${entry}`);
+      fs.appendFileSync(OUT_FILE, `${entry}\n`);
     }
   } catch (err) {
-    console.error(`Script error: ${err.message}`);
+    console.error(`Script error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
   } finally {
+    for (const [reason, count] of filterReasons) console.log(`FILTERED ${count} candidates: ${reason}`);
     await browser.close();
     console.log('Batch complete.');
   }

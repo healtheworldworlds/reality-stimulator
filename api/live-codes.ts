@@ -1,3 +1,5 @@
+import { isAdminKey } from './admin-auth.js'
+
 type Bookie = 'sportybet' | 'betway'
 
 type LiveCode = {
@@ -8,9 +10,16 @@ type LiveCode = {
   bookie: Bookie
   channel: string
   countryCode: CountryCode
+  source?: 'telegram' | 'generated'
+  generatedAt?: string
+  legs?: Array<{ event_id?: string; home_team?: string; away_team?: string; market: string; pick: string; odds: number }>
 }
 
-type CodesRequest = { method?: string }
+type CodesRequest = {
+  method?: string
+  headers?: Record<string, string | string[] | undefined>
+  body?: unknown
+}
 
 type CodesResponse = {
   setHeader(name: string, value: string | number): void
@@ -40,6 +49,7 @@ const STOP_WORDS = new Set([
   'TODAY', 'FREE', 'TICKET', 'VOUCHER', 'WINNER', 'MOBILE', 'TOMORROW', 'WINNERS',
 ])
 const MAX_CODE_AGE_MS = 24 * 60 * 60 * 1000
+const GENERATED_CODES_KEY = 'reality-simulator:generated-live-codes'
 
 type FeedBody = {
   success: true
@@ -50,6 +60,86 @@ type FeedBody = {
 }
 
 let cached: { expiresAt: number, body: FeedBody } | null = null
+let generatedMemory: LiveCode[] = []
+
+function headerValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? ''
+}
+
+function kvCredentials() {
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN
+  return url && token ? { url: url.replace(/\/+$/, ''), token } : null
+}
+
+async function kvCommand(command: unknown[]) {
+  const credentials = kvCredentials()
+  if (!credentials) return null
+  const response = await fetch(credentials.url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${credentials.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(command),
+    signal: AbortSignal.timeout(5000),
+  })
+  if (!response.ok) throw new Error(`Live code storage returned HTTP ${response.status}.`)
+  return response.json() as Promise<{ result?: unknown }>
+}
+
+async function readGeneratedCodes() {
+  const result = await kvCommand(['LRANGE', GENERATED_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
+  if (!result || !Array.isArray(result.result)) return generatedMemory
+  return result.result.flatMap((item) => {
+    if (typeof item !== 'string') return []
+    try {
+      const parsed = JSON.parse(item) as LiveCode
+      return parsed.code ? [parsed] : []
+    } catch {
+      return []
+    }
+  })
+}
+
+function parseBody(body: unknown): Record<string, unknown> | null {
+  let value = body
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+async function storeGeneratedCode(body: Record<string, unknown>) {
+  const code = typeof body.code === 'string' ? body.code.toUpperCase() : ''
+  const time = typeof body.time === 'string' && Number.isFinite(Date.parse(body.time))
+    ? new Date(body.time).toISOString()
+    : new Date().toISOString()
+  const legs = Array.isArray(body.legs) ? body.legs : []
+  if (!/^[A-Z0-9]{6,12}$/.test(code) || legs.length === 0 || legs.length > 100) {
+    throw new Error('A valid booking code and 1–100 structured legs are required.')
+  }
+  const record: LiveCode = {
+    id: `generated:${code}:${time}`,
+    code,
+    odds: legs.reduce((total, leg) => total * (typeof (leg as Record<string, unknown>)?.odds === 'number' ? (leg as Record<string, number>).odds : 1), 1),
+    time,
+    bookie: 'sportybet',
+    channel: typeof body.channel === 'string' ? body.channel : 'reality-simulator',
+    countryCode: 'GHANA',
+    source: 'generated',
+    generatedAt: time,
+    legs: legs as LiveCode['legs'],
+  }
+  generatedMemory = [record, ...generatedMemory.filter((item) => item.code !== record.code)].slice(0, MAX_PER_BOOKIE)
+  await kvCommand(['LPUSH', GENERATED_CODES_KEY, JSON.stringify(record)])
+  await kvCommand(['LTRIM', GENERATED_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
+  cached = null
+  return record
+}
 
 function decodeEntities(value: string) {
   return value
@@ -126,15 +216,27 @@ async function fetchChannel(channel: string): Promise<LiveCode[]> {
     const text = htmlToText(body).trim()
     const odds = findOdds(text)
     for (const { bookie, code } of extractCodes(`${body} ${text}`, channel)) {
-      codes.push({ id: `${post}:${bookie}:${code}`, code, odds, time: new Date(postTime).toISOString(), bookie, channel, countryCode })
+      codes.push({ id: `${post}:${bookie}:${code}`, code, odds, time: new Date(postTime).toISOString(), bookie, channel, countryCode, source: 'telegram' })
     }
   }
   return codes
 }
 
 export default async function liveCodesHandler(request: CodesRequest, response: CodesResponse) {
-  response.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30')
+  response.setHeader('Cache-Control', request.method === 'POST' ? 'no-store' : 'public, s-maxage=60, stale-while-revalidate=30')
   response.setHeader('X-Content-Type-Options', 'nosniff')
+  if (request.method === 'POST') {
+    if (!isAdminKey(headerValue(request.headers?.['x-admin-key']))) {
+      return response.status(401).json({ success: false, error: 'A valid admin key is required.' })
+    }
+    try {
+      const record = await storeGeneratedCode(parseBody(request.body) ?? {})
+      return response.status(201).json({ success: true, code: record })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Invalid generated code.'
+      return response.status(message.startsWith('Live code storage') ? 503 : 400).json({ success: false, error: message })
+    }
+  }
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET')
     return response.status(405).json({ success: false, error: 'Method not allowed.' })
@@ -168,10 +270,18 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
       seen.add(key)
       return true
     })
+  let generated: LiveCode[]
+  try {
+    generated = await readGeneratedCodes()
+  } catch {
+    generated = generatedMemory
+  }
   const body = {
     success: true as const,
     updatedAt: new Date(now).toISOString(),
-    sportybet: newestFirst.filter((item) => item.bookie === 'sportybet').slice(0, MAX_PER_BOOKIE),
+    sportybet: [...generated, ...newestFirst.filter((item) => item.bookie === 'sportybet')]
+      .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
+      .slice(0, MAX_PER_BOOKIE),
     betway: newestFirst.filter((item) => item.bookie === 'betway').slice(0, MAX_PER_BOOKIE),
     ...(warnings.length > 0 ? { warnings } : {}),
   }

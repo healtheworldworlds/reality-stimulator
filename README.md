@@ -24,7 +24,7 @@ The matrix is normalized before deriving 1X2, Over/Under 1.5 and 2.5, and BTTS p
 
 ## Fixture generator
 
-The Automated Match Generator requests today's fixtures from the same-origin `/api/fixtures` Vercel serverless endpoint using UTC dates and kickoff times. Configure `FOOTBALL_API_KEY` as a server-side Vercel environment variable; the endpoint forwards it to API-Football and returns only clean fixture fields. It limits each client to 30 requests per minute and caches daily API responses for 15 minutes per warm function instance. The browser keeps only fixtures with status `NS` inside the selected kickoff window. If the server key is missing, the API is unavailable/rate-limited, or no fixtures match the selected window, the generator falls back to unscheduled pairings from the internal club registry. Never prefix the API key with `VITE_` or store it in browser localStorage. Use `vercel dev` to run the serverless endpoint locally.
+The Automated Match Generator requests today's fixtures from the same-origin `/api/fixtures` Vercel serverless endpoint. The endpoint reads upcoming football events from SportyBet Ghana and returns normalized fixture fields. If SportyBet is unavailable or returns no events, the browser falls back to the checked-in fixture sample and then to unscheduled pairings from the internal club registry. Use `vercel dev` to run the serverless endpoint locally.
 
 The endpoint's rate limit and cache are in-memory best-effort protections and may reset when serverless instances restart or scale. Use a shared store such as Redis/KV if a deployment needs globally coordinated limits or caching.
 
@@ -46,10 +46,10 @@ Add custom fixtures above the fixture board. Home/draw/away prices are entered e
 
 ## Security notes
 
-- Optional visitor password protection is managed through the hidden developer-badge admin control and `/api/auth-settings`. The requested `REGINA` master key is hard-coded in `api/admin-auth.ts` (shared by `/api/auth-settings` and `/api/ingest-media`) and is not suitable as a production secret; replace it with a server-only environment secret before relying on admin access.
+- Optional visitor password protection is managed through the hidden developer-badge admin control and `/api/auth-settings`. Configure the server-only `ADMIN_MASTER_KEY` environment variable; `/api/auth-settings` and `/api/ingest-media` fail closed when it is missing. Set `AUTH_DEFAULT_ACCESS_CODE` if password protection should have an initial visitor code.
 - Local scratch scripts, captured API dumps and session files (including SportyBet cookies) live in the git-ignored `.sandbox/` folder. Never commit `.sandbox/` contents or real session credentials.
 - Authentication settings use Vercel KV/Upstash when `KV_REST_API_URL` and `KV_REST_API_TOKEN` (or `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`) are configured. Without these bindings settings are stored in per-instance memory and may reset or differ across serverless instances.
-- Vite exposes `VITE_`-prefixed environment variables to browser code. Treat every such variable as public; the API-Football credential is server-only as `FOOTBALL_API_KEY`.
+- Slip generation requires the server-side `CONVERTBETCODES_API_KEY`. The workflow also accepts `LIVE_CODES_ENDPOINT` (the deployed `/api/live-codes` URL) and `ADMIN_MASTER_KEY` as the `LIVE_CODES_ADMIN_KEY` to persist generated Ghana SportyBet codes. Generated records use KV/Upstash when configured and otherwise remain in the warm function instance.
 - Rates, ρ, half-life, odds and simulation dimensions have engine-side bounds. Monte Carlo runs are capped at 100,000, with total fixture/pick trial budgets, and execute in a module Web Worker.
 - Vite dev/preview responses, `vercel.json`, and the static-host `public/_headers` configuration set CSP and browser security headers. CSP allows WebAssembly compilation with `wasm-unsafe-eval`; it does not allow general `unsafe-eval`. Development CSP permits Vite/React Refresh inline scripts and styles for HMR; production CSP permits neither.
 - Production builds explicitly disable source maps. Run `npm audit` and inspect the deployment host's response headers as part of release checks.

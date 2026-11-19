@@ -19,7 +19,10 @@ type AuthResponse = {
   json(body: unknown): AuthResponse
 }
 
-const DEFAULT_SETTINGS: AuthSettings = { passwordRequired: false, appAccessCode: '1234' }
+const DEFAULT_SETTINGS: AuthSettings = {
+  passwordRequired: false,
+  appAccessCode: process.env.AUTH_DEFAULT_ACCESS_CODE ?? '',
+}
 let memorySettings: AuthSettings = { ...DEFAULT_SETTINGS }
 
 function bodyRecord(body: unknown): Record<string, unknown> | null {
@@ -106,7 +109,9 @@ export default async function authSettingsHandler(request: AuthRequest, response
     if (action === 'verify') {
       if (typeof body.code !== 'string') return response.status(400).json({ valid: false, error: 'A visitor access code is required.' })
       const settings = await readSettings()
-      return response.status(200).json({ valid: secureEquals(body.code, settings.appAccessCode) })
+      return response.status(200).json({
+        valid: settings.appAccessCode.length > 0 && secureEquals(body.code, settings.appAccessCode),
+      })
     }
 
     if (action === 'verify-master') {
@@ -126,6 +131,9 @@ export default async function authSettingsHandler(request: AuthRequest, response
       }
       const current = await readSettings()
       const appAccessCode = body.newAccessCode.length > 0 ? body.newAccessCode : current.appAccessCode
+      if (body.passwordRequired && appAccessCode.length === 0) {
+        return response.status(400).json({ success: false, error: 'Set a visitor access code before enabling password protection.' })
+      }
       await writeSettings({ passwordRequired: body.passwordRequired, appAccessCode })
       return response.status(200).json({ success: true })
     }

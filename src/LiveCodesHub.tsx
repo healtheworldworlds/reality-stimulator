@@ -11,6 +11,8 @@ type LiveCode = {
   bookie: Bookie
   channel: string
   countryCode?: 'GHANA' | 'NIGERIA'
+  source?: 'telegram' | 'generated'
+  legs?: Array<{ market: string; pick: string; odds: number }>
 }
 
 type FeedPayload = {
@@ -128,16 +130,19 @@ export function LiveCodesHub() {
               <span className="live-code__country">
                 {item.countryCode ?? 'GHANA'}
               </span>
+              {item.source === 'generated' && <span className="live-code__country">GENERATED</span>}
             </div>
             <div className="live-code__tags">
               {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}
+              {item.legs && <span className="live-code__odds">{item.legs.length} legs</span>}
+              {item.legs && <span className="live-code__channel">{[...new Set(item.legs.map((leg) => leg.market))].join(', ')}</span>}
               <span className="live-code__time">{relativeTime(item.time, now)}</span>
               <span className="live-code__channel">@{item.channel}</span>
             </div>
             <div className="live-code__actions">
               <button className="quiet-button" type="button" onClick={() => void copyCode(item)}>
                 {copiedId === item.id ? '✓ Code Copied!' : 'Copy Code'}
-              </button>
+              </button>
             </div>
           </li>
         ))}
