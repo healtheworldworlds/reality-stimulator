@@ -58,5 +58,7 @@ jobs:
         if: always()
         with:
           name: generated-booking-codes
-          path: generated_codes.txt
+          path: |
+            generated_codes.txt
+            generated_slips.jsonl
           if-no-files-found: warn

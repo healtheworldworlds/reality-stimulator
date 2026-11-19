@@ -9,7 +9,7 @@ type LiveCode = {
   bookie: 'sportybet'
   channel: string
   countryCode?: 'GHANA'
-  source?: 'telegram' | 'generated'
+  source?: 'telegram' | 'generated' | 'manual'
   legs?: Array<{ market: string; pick: string; odds: number }>
 }
 
@@ -118,6 +118,7 @@ export function LiveCodesHub() {
                 {item.countryCode ?? 'GHANA'}
               </span>
               {item.source === 'generated' && <span className="live-code__country">GENERATED</span>}
+              {item.source === 'manual' && <span className="live-code__country">MANUAL</span>}
             </div>
             <div className="live-code__tags">
               {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}

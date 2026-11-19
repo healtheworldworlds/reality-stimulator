@@ -10,8 +10,9 @@ type LiveCode = {
   bookie: Bookie
   channel: string
   countryCode: CountryCode
-  source?: 'telegram' | 'generated'
+  source?: 'telegram' | 'generated' | 'manual'
   generatedAt?: string
+  expiresAt?: string
   legs?: Array<{ event_id?: string; home_team?: string; away_team?: string; market: string; pick: string; odds: number }>
 }
 
@@ -45,6 +46,8 @@ const STOP_WORDS = new Set([
 ])
 const MAX_CODE_AGE_MS = 24 * 60 * 60 * 1000
 const GENERATED_CODES_KEY = 'reality-simulator:generated-live-codes'
+const MANUAL_CODES_KEY = 'reality-simulator:manual-live-codes'
+const GENERATED_CODE_TTL_MS = 24 * 60 * 60 * 1000
 
 type FeedBody = {
   success: true
@@ -55,6 +58,7 @@ type FeedBody = {
 
 let cached: { expiresAt: number, body: FeedBody } | null = null
 let generatedMemory: LiveCode[] = []
+let manualMemory: LiveCode[] = []
 
 function headerValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] ?? '' : value ?? ''
@@ -81,8 +85,9 @@ async function kvCommand(command: unknown[]) {
 
 async function readGeneratedCodes() {
   const result = await kvCommand(['LRANGE', GENERATED_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
-  if (!result || !Array.isArray(result.result)) return generatedMemory
-  return result.result.flatMap((item) => {
+  const stored = !result || !Array.isArray(result.result)
+    ? generatedMemory
+    : result.result.flatMap((item) => {
     if (typeof item !== 'string') return []
     try {
       const parsed = JSON.parse(item) as LiveCode
@@ -94,6 +99,35 @@ async function readGeneratedCodes() {
       return []
     }
   })
+  const now = Date.now()
+  return stored.filter((item) => {
+    if (item.source !== 'generated') return false
+    const expiresAt = item.expiresAt ? Date.parse(item.expiresAt) : Date.parse(item.time) + GENERATED_CODE_TTL_MS
+    return Number.isFinite(expiresAt) && expiresAt > now
+  })
+}
+
+async function readManualCodes() {
+  const result = await kvCommand(['LRANGE', MANUAL_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
+  const stored = !result || !Array.isArray(result.result)
+    ? manualMemory
+    : result.result.flatMap((item) => {
+      if (typeof item !== 'string') return []
+      try {
+        const parsed = JSON.parse(item) as LiveCode
+        return parsed.source === 'manual' &&
+          parsed.bookie === 'sportybet' &&
+          parsed.countryCode === 'GHANA'
+          ? [parsed]
+          : []
+      } catch {
+        return []
+      }
+    })
+  return stored.filter((item) =>
+    item.source === 'manual' &&
+    item.bookie === 'sportybet' &&
+    item.countryCode === 'GHANA')
 }
 
 function parseBody(body: unknown): Record<string, unknown> | null {
@@ -110,6 +144,26 @@ function parseBody(body: unknown): Record<string, unknown> | null {
     : null
 }
 
+function validStoredLegs(value: unknown[]): unknown[] | null {
+  if (value.length < 1 || value.length > 100) return null
+  const eventIds = new Set<string>()
+  const legs: unknown[] = []
+  for (const rawLeg of value) {
+    if (typeof rawLeg !== 'object' || rawLeg === null) return null
+    const leg = rawLeg as Record<string, unknown>
+    const eventId = typeof leg.event_id === 'string' ? leg.event_id.trim() : ''
+    const market = typeof leg.market === 'string' ? leg.market.trim() : ''
+    const pick = typeof leg.pick === 'string' ? leg.pick.trim() : ''
+    const odds = typeof leg.odds === 'number' ? leg.odds : Number(leg.odds)
+    if (!eventId || eventId.length > 128 || !market || market.length > 64 ||
+      !pick || pick.length > 64 || !Number.isFinite(odds) || odds < 1 || odds > 1000 ||
+      eventIds.has(eventId)) return null
+    eventIds.add(eventId)
+    legs.push({ event_id: eventId, market, pick, odds })
+  }
+  return legs
+}
+
 async function storeGeneratedCode(body: Record<string, unknown>) {
   const code = typeof body.code === 'string' ? body.code.toUpperCase() : ''
   const countryCode = typeof body.countryCode === 'string' ? body.countryCode.toUpperCase() : 'GHANA'
@@ -121,9 +175,14 @@ async function storeGeneratedCode(body: Record<string, unknown>) {
     ? new Date(body.time).toISOString()
     : new Date().toISOString()
   const legs = Array.isArray(body.legs) ? body.legs : []
-  if (!/^[A-Z0-9]{6,12}$/.test(code) || legs.length === 0 || legs.length > 100) {
-    throw new Error('A valid booking code and 1–100 structured legs are required.')
+  const validLegs = validStoredLegs(legs)
+  if (!/^[A-Z0-9]{6,12}$/.test(code) || validLegs === null) {
+    throw new Error('A valid booking code and 1–100 unique, structured legs are required.')
   }
+  const source = body.source === 'manual' ? 'manual' : 'generated'
+  const expiresAt = source === 'generated'
+    ? new Date(Date.parse(time) + GENERATED_CODE_TTL_MS).toISOString()
+    : undefined
   const record: LiveCode = {
     id: `generated:${code}:${time}`,
     code,
@@ -132,13 +191,24 @@ async function storeGeneratedCode(body: Record<string, unknown>) {
     bookie: 'sportybet',
     channel: typeof body.channel === 'string' ? body.channel : 'reality-simulator',
     countryCode: 'GHANA',
-    source: 'generated',
+    source,
     generatedAt: time,
-    legs: legs as LiveCode['legs'],
+    expiresAt,
+    legs: validLegs as LiveCode['legs'],
   }
-  generatedMemory = [record, ...generatedMemory.filter((item) => item.code !== record.code)].slice(0, MAX_PER_BOOKIE)
-  await kvCommand(['LPUSH', GENERATED_CODES_KEY, JSON.stringify(record)])
-  await kvCommand(['LTRIM', GENERATED_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
+  if (source === 'manual') {
+    manualMemory = [record, ...manualMemory.filter((item) => item.code !== record.code)].slice(0, MAX_PER_BOOKIE)
+    await kvCommand(['LPUSH', MANUAL_CODES_KEY, JSON.stringify(record)])
+    await kvCommand(['LTRIM', MANUAL_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
+  } else {
+    generatedMemory = [record, ...generatedMemory.filter((item) =>
+    item.code !== record.code &&
+    item.source === 'generated' &&
+    (!item.expiresAt || Date.parse(item.expiresAt) > Date.now()),
+    )].slice(0, MAX_PER_BOOKIE)
+    await kvCommand(['LPUSH', GENERATED_CODES_KEY, JSON.stringify(record)])
+    await kvCommand(['LTRIM', GENERATED_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
+  }
   cached = null
   return record
 }
@@ -238,7 +308,17 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
   }
 
   const now = Date.now()
-  if (cached && cached.expiresAt > now) return response.status(200).json(cached.body)
+  if (cached && cached.expiresAt > now) {
+    const filtered = {
+      ...cached.body,
+      sportybet: cached.body.sportybet.filter((item) =>
+        item.bookie === 'sportybet' &&
+        item.countryCode === 'GHANA' &&
+        (item.source !== 'generated' ||
+          (!item.expiresAt || Date.parse(item.expiresAt) > now))),
+    }
+    return response.status(200).json(filtered)
+  }
 
   const settled = await Promise.allSettled(CHANNELS.map(fetchChannel))
   const all = settled.flatMap((result) => result.status === 'fulfilled' ? result.value : [])
@@ -265,17 +345,24 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
       return true
     })
   let generated: LiveCode[]
+  let manual: LiveCode[]
   try {
     generated = await readGeneratedCodes()
+    manual = await readManualCodes()
   } catch {
     generated = generatedMemory
+    manual = manualMemory
   }
   generated = generated.filter((item) =>
     item.bookie === 'sportybet' && item.countryCode === 'GHANA')
+  manual = manual.filter((item) =>
+    item.source === 'manual' &&
+    item.bookie === 'sportybet' &&
+    item.countryCode === 'GHANA')
   const body = {
     success: true as const,
     updatedAt: new Date(now).toISOString(),
-    sportybet: [...generated, ...newestFirst.filter((item) => item.bookie === 'sportybet')]
+    sportybet: [...generated, ...manual, ...newestFirst.filter((item) => item.bookie === 'sportybet')]
       .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
       .slice(0, MAX_PER_BOOKIE),
     ...(warnings.length > 0 ? { warnings } : {}),

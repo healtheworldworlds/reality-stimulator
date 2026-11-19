@@ -2,6 +2,7 @@
 import fs from 'fs';
 import { assertTargetBookieSupported, generateBetCode, resolveMarketKeys, resolvePickKey, TARGET_BOOKIE } from './convert-bet-codes.js';
 import { filterCandidate, marketCandidates, pickCandidates, readCardCandidate } from './slip-filter.js';
+import { appendSlipManifest, createSlipManifest } from './slip-manifest.js';
 
 const args = process.argv.slice(2);
 const getArg = (key, fallback) => {
@@ -14,6 +15,8 @@ const SLIPS = parseInt(getArg('slips', '7'), 10);
 const DAY = getArg('day', 'Today'); // 'Today' or 'Tomorrow'
 const MARKET = getArg('market', 'OVER_1_5');
 const OUT_FILE = 'generated_codes.txt';
+const MANIFEST_FILE = 'generated_slips.jsonl';
+const MAX_SCROLL_ATTEMPTS = 45;
 const MARKET_LABELS = {
   OVER_1_5: 'Over 1.5',
   OVER_2_5: 'Over 2.5',
@@ -29,17 +32,26 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
 
 (async () => {
   console.log(`Starting Stable Slip Generator: Day=${DAY}, Market=${MARKET}, Legs=${LEGS}, Slips=${SLIPS}...`);
+  fs.writeFileSync(OUT_FILE, '');
+  fs.writeFileSync(MANIFEST_FILE, '');
   let marketKeys;
-  try {
-    await assertTargetBookieSupported();
-    marketKeys = await resolveMarketKeys({ [MARKET]: marketCandidates(MARKET) });
-  } catch (error) {
-    console.error(`ConvertBetCodes preflight failed: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = 1;
-    return;
+  const convertApiKey = process.env.CONVERTBETCODES_API_KEY?.trim();
+  if (convertApiKey) {
+    try {
+      await assertTargetBookieSupported();
+      marketKeys = await resolveMarketKeys({ [MARKET]: marketCandidates(MARKET) });
+    } catch (error) {
+      console.error(`ConvertBetCodes preflight failed: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+      return;
+    }
+  } else {
+    console.warn('CONVERTBETCODES_API_KEY is not configured; generating structured slips without booking codes.');
+    marketKeys = { [MARKET]: MARKET };
   }
   const pickKeys = new Map();
   const resolvePick = async (rawPick) => {
+    if (!convertApiKey) return rawPick.trim().slice(0, 64);
     const cacheKey = `${MARKET}:${rawPick}`;
     if (!pickKeys.has(cacheKey)) {
       pickKeys.set(cacheKey, await resolvePickKey(rawPick, pickCandidates(MARKET, rawPick)));
@@ -76,7 +88,6 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
     const payload = await response.json().catch(() => null);
     if (!response.ok) throw new Error(payload?.error ?? `Live code persistence failed (HTTP ${response.status}).`);
   };
-  fs.writeFileSync(OUT_FILE, '');
   let browser;
   try {
     browser = await chromium.launch({ headless: process.env.HEADFUL !== '1', slowMo: process.env.CI ? 0 : 70 });
@@ -160,7 +171,7 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
       let scrollAttempts = 0;
 
       const selectedLegs = [];
-      while (pickedMatchIds.size < LEGS && scrollAttempts < 45) {
+      while (pickedMatchIds.size < LEGS && scrollAttempts < MAX_SCROLL_ATTEMPTS) {
         const cards = await page.locator('[data-key]:has(.m-event-sport)').all();
         const shuffled = cards.sort(() => 0.5 - Math.random());
 
@@ -218,11 +229,27 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
       }
 
       if (selectedLegs.length !== LEGS) throw new Error(`Slip ${s} has ${selectedLegs.length}/${LEGS} structured legs.`);
-      console.log(`Generating ConvertBetCodes slip ${s}/${SLIPS} for ${TARGET_BOOKIE}...`);
-      const { code } = await generateBetCode(selectedLegs);
-      await publishCode(code, selectedLegs, s);
-      const entry = `[Slip ${s}/${SLIPS}] Code: ${code} | Bookie: ${TARGET_BOOKIE} | Day: ${DAY} | Market: ${MARKET} | Legs: ${LEGS}`;
-      console.log(`SUCCESS: ${entry}`);
+      const timestamp = new Date().toISOString();
+      let code = null;
+      if (convertApiKey) {
+        console.log(`Generating ConvertBetCodes slip ${s}/${SLIPS} for ${TARGET_BOOKIE}...`);
+        ({ code } = await generateBetCode(selectedLegs));
+        await publishCode(code, selectedLegs, s);
+      } else {
+        console.log(`Skipping booking-code generation for slip ${s}/${SLIPS}: API key unavailable.`);
+      }
+      const manifest = createSlipManifest({
+        slipNumber: s,
+        market: MARKET,
+        legs: selectedLegs,
+        code,
+        timestamp,
+      });
+      appendSlipManifest(MANIFEST_FILE, manifest);
+      const entry = code
+        ? `[Slip ${s}/${SLIPS}] Code: ${code} | Bookie: ${TARGET_BOOKIE} | Day: ${DAY} | Market: ${MARKET} | Legs: ${LEGS}`
+        : `[Slip ${s}/${SLIPS}] Code: NOT GENERATED | Bookie: ${TARGET_BOOKIE} | Day: ${DAY} | Market: ${MARKET} | Legs: ${LEGS}`;
+      console.log(`${code ? 'SUCCESS' : 'STRUCTURED SLIP'}: ${entry}`);
       fs.appendFileSync(OUT_FILE, `${entry}\n`);
     }
   } catch (err) {
