@@ -1,4 +1,4 @@
-const GOAL_MARKETS = new Set(['OVER_1_5', 'OVER_2_5', '2H_HIGHEST', 'GG_NG']);
+const GOAL_MARKETS = new Set(['OVER_1_5', 'OVER_2_5', '2H_HIGHEST', 'NO_THREE_GOAL_STREAK', 'GG_NG']);
 
 function toFiniteStreak(value) {
   if (typeof value === 'number' && Number.isInteger(value) && value >= 0) return value;
@@ -58,6 +58,7 @@ export function filterCandidate(candidate, market) {
 export function marketCandidates(market) {
   return {
     OVER_1_5: ['over_1_5', 'over 1.5', 'o1.5', 'totals'],
+    NO_THREE_GOAL_STREAK: ['over_1_5', 'over 1.5', 'no goal streak', 'totals'],
     OVER_2_5: ['over_2_5', 'over 2.5', 'o2.5', 'totals'],
     '2H_HIGHEST': ['2h_highest', '2nd half highest', 'second half highest'],
     '1X2': ['1x2', 'match result', 'full time result'],
@@ -67,7 +68,7 @@ export function marketCandidates(market) {
 
 export function pickCandidates(market, pick) {
   const normalized = pick.toLowerCase().replace(/^label-odds$/, '');
-  if (market === 'OVER_1_5' || market === 'OVER_2_5') return ['over', 'o'];
+  if (market === 'OVER_1_5' || market === 'OVER_2_5' || market === 'NO_THREE_GOAL_STREAK') return ['over', 'o'];
   if (market === 'GG_NG') return normalized.includes('no') || normalized === 'ng' ? ['ng', 'no'] : ['gg', 'yes'];
   if (market === '2H_HIGHEST') return normalized.includes('away') ? ['away', '2'] : ['home', '1'];
   return [normalized, normalized === 'draw' ? 'x' : normalized];

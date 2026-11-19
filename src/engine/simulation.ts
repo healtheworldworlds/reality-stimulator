@@ -13,7 +13,7 @@ export type MarketSelection = Market
 
 export type MarketProbabilities = Record<Market, number>
 
-export type AutomatedMarket = 'over15' | 'secondHalfHighest' | 'over25'
+export type AutomatedMarket = 'over15' | 'secondHalfHighest' | 'over25' | 'noThreeGoalStreak'
 
 export type GoalMarketCalibration = {
   lambda: number
@@ -232,7 +232,7 @@ export function calibrateGoalMarket(
   const targetOdds = (minOdds + maxOdds) / 2
   const targetProbability = 1 / targetOdds
   if (market !== 'secondHalfHighest') {
-    const selection = market
+    const selection = market === 'noThreeGoalStreak' ? 'over15' : market
     let low = 0
     let high = 5
     if (calculateProbabilities(high / 2, high / 2, rho)[selection] < targetProbability) return null

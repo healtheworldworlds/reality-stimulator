@@ -12,6 +12,7 @@ on:
           - OVER_1_5
           - OVER_2_5
           - 2H_HIGHEST
+          - NO_THREE_GOAL_STREAK
           - 1X2
           - GG_NG
       legs:

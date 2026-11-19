@@ -97,6 +97,7 @@ const automatedMarketLabels: Record<AutomatedMarket, string> = {
   over15: 'Over 1.5 Goals',
   secondHalfHighest: 'Second Half Highest Scoring',
   over25: 'Over 2.5 Goals',
+  noThreeGoalStreak: 'No team to score more than 3 goals in a row',
 }
 
 function allocateHalfGoals(homeGoals: number, awayGoals: number, secondHalfShare: number) {
@@ -112,6 +113,7 @@ function allocateHalfGoals(homeGoals: number, awayGoals: number, secondHalfShare
 function marketHit(market: AutomatedMarket, result: RoundResult) {
   if (market === 'over15') return result.homeGoals + result.awayGoals >= 2
   if (market === 'over25') return result.homeGoals + result.awayGoals >= 3
+  if (market === 'noThreeGoalStreak') return result.homeGoals + result.awayGoals >= 2
   return result.secondHalfGoals > result.firstHalfGoals
 }
 
@@ -125,9 +127,9 @@ function currentUtcClockTime() {
   return new Date().toISOString().slice(11, 16)
 }
 
-function selectLiveFixtures(fixtures: LiveFixture[], count: number, market: string, enforceNoThreePlusScoringStreak: boolean) {
-  const goalMarket = ['over15', 'over25', 'secondHalfHighest'].includes(market)
-  const eligible = goalMarket && enforceNoThreePlusScoringStreak
+function selectLiveFixtures(fixtures: LiveFixture[], count: number, market: string) {
+  const goalMarket = ['over15', 'over25', 'secondHalfHighest', 'noThreeGoalStreak'].includes(market)
+  const eligible = goalMarket
     ? fixtures.filter((fixture) =>
       fixture.streakDataAvailable &&
       typeof fixture.homeScoringStreak === 'number' &&
@@ -357,7 +359,6 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
   const [fixtureBoardOpen, setFixtureBoardOpen] = useState(false)
   const [activeGroup, setActiveGroup] = useState<keyof typeof marketGroups>('result')
   const [generatorMarket, setGeneratorMarket] = useState<AutomatedMarket>('over15')
-  const [noTeamScoresMoreThanThree, setNoTeamScoresMoreThanThree] = useState(true)
   const [roundMarket, setRoundMarket] = useState<AutomatedMarket>('over15')
   const [matchCount, setMatchCount] = useState('17')
   const [minimumOdds, setMinimumOdds] = useState('1.30')
@@ -454,9 +455,9 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
     try {
       const liveResult = await fetchTodaysFixtures(start, end)
       const liveMatchups = liveResult.status === 'available'
-        ? selectLiveFixtures(liveResult.fixtures, count, generatorMarket, noTeamScoresMoreThanThree)
+        ? selectLiveFixtures(liveResult.fixtures, count, generatorMarket)
         : []
-      if (noTeamScoresMoreThanThree && liveMatchups.length < count) {
+      if (generatorMarket === 'noThreeGoalStreak' && liveMatchups.length < count) {
         setMarketGeneratorSummary(
           `No Team Scores More Than 3: only ${liveMatchups.length} verified fixture${liveMatchups.length === 1 ? '' : 's'} met the streak rule. No unverified or registry fallback matches were added.`,
         )
@@ -805,7 +806,7 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
                 <span>Market selector</span>
                 <select value={generatorMarket} onChange={(event) => {
                   const value = event.target.value
-                  if (value !== 'over15' && value !== 'secondHalfHighest' && value !== 'over25') return
+                  if (value !== 'over15' && value !== 'secondHalfHighest' && value !== 'over25' && value !== 'noThreeGoalStreak') return
                   setGeneratorMarket(value)
                   setMinimumOdds(value === 'secondHalfHighest' ? '1.80' : '1.20')
                   setMaximumOdds(value === 'secondHalfHighest' ? '2.30' : '1.50')
@@ -813,18 +814,8 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
                   <option value="over15">Over 1.5 Goals</option>
                   <option value="secondHalfHighest">Second Half Highest Scoring</option>
                   <option value="over25">Over 2.5 Goals</option>
+                  <option value="noThreeGoalStreak">No team to score more than 3 goals in a row</option>
                 </select>
-              </label>
-              <label className="market-generator__rule">
-                <input
-                  type="checkbox"
-                  checked={noTeamScoresMoreThanThree}
-                  onChange={(event) => setNoTeamScoresMoreThanThree(event.target.checked)}
-                />
-                <span>
-                  <strong>No team to score more than 3 goals in a row</strong>
-                  <small>Exclude matches without verified streak data.</small>
-                </span>
               </label>
               <label className="form-field">
                 <span>Match count</span>

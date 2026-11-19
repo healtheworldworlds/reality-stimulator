@@ -720,35 +720,6 @@ h2 {
   grid-column: 1 / -1;
 }
 
-.market-generator__rule {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 9px 10px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 9px;
-  cursor: pointer;
-}
-
-.market-generator__rule input {
-  margin-top: 1px;
-  accent-color: var(--accent);
-}
-
-.market-generator__rule span {
-  display: grid;
-  gap: 2px;
-}
-
-.market-generator__rule small {
-  color: var(--muted);
-  font-size: 8px;
-  line-height: 1.35;
-}
 
 .market-generator__odds,
 .market-generator__kickoff {

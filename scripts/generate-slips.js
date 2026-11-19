@@ -18,6 +18,7 @@ const MARKET_LABELS = {
   OVER_1_5: 'Over 1.5',
   OVER_2_5: 'Over 2.5',
   '2H_HIGHEST': '2nd Half Highest',
+  NO_THREE_GOAL_STREAK: 'No team to score more than 3 goals in a row',
   '1X2': '1X2',
   GG_NG: 'GG/NG'
 };
@@ -132,7 +133,7 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
       // 4. Switch to the requested market tab
       if (MARKET !== '1X2') try {
         const marketTab = page.locator('.m-market-tab, span, div').filter({ hasText: new RegExp(
-          MARKET === '2H_HIGHEST' ? '2nd Half|2H' : 'O\\/U|GG\\/NG',
+          MARKET === '2H_HIGHEST' ? '2nd Half|2H' : MARKET === 'NO_THREE_GOAL_STREAK' ? 'O\\/U|Over|1\\.5' : 'O\\/U|GG\\/NG',
           'i'
         ) }).first();
         await marketTab.waitFor({ state: 'visible', timeout: 4000 });
@@ -143,7 +144,9 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
       }
 
       if (MARKET !== '2H_HIGHEST') {
-        const targetMarket = MARKET === 'OVER_2_5' ? '2.5' : MARKET === 'OVER_1_5' ? '1.5' : 'GG|NG';
+        const targetMarket = MARKET === 'OVER_2_5' ? '2.5'
+          : MARKET === 'OVER_1_5' || MARKET === 'NO_THREE_GOAL_STREAK' ? '1.5'
+          : 'GG|NG';
         const marketFilter = page.locator('span, div, li').filter({ hasText: new RegExp(`^(${targetMarket})$`, 'i') }).first();
         await marketFilter.waitFor({ state: 'visible', timeout: 3000 }).catch(() => {});
         if (await marketFilter.isVisible().catch(() => false)) {
