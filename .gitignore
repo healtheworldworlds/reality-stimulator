@@ -29,6 +29,7 @@ lerna-debug.log*
 *.sw?
 generated_codes.txt
 generated_slips.jsonl
+.sportybet-profile/
 
 # Local scratch scripts, captured outputs and session dumps (never commit)
 .sandbox/

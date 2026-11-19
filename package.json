@@ -10,6 +10,8 @@
     "book:2h": "node scripts/generate-slips.js --market=2H_HIGHEST --legs=14 --slips=100",
     "book:over15": "node scripts/generate-slips.js --market=OVER_1_5 --legs=17 --slips=100",
     "book:over25": "node scripts/generate-slips.js --market=OVER_2_5 --legs=14 --slips=100",
+    "sportybet:setup": "node scripts/sportybet-local-runner.js --setup",
+    "sportybet:load": "node scripts/sportybet-local-runner.js",
     "preview": "vite preview"
   },
   "dependencies": {
