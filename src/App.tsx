@@ -125,8 +125,17 @@ function currentUtcClockTime() {
   return new Date().toISOString().slice(11, 16)
 }
 
-function selectLiveFixtures(fixtures: LiveFixture[], count: number) {
-  const shuffled = [...fixtures]
+function selectLiveFixtures(fixtures: LiveFixture[], count: number, market: string) {
+  const goalMarket = ['over15', 'over25', 'secondHalfHighest'].includes(market)
+  const eligible = goalMarket
+    ? fixtures.filter((fixture) =>
+      fixture.streakDataAvailable &&
+      typeof fixture.homeScoringStreak === 'number' &&
+      typeof fixture.awayScoringStreak === 'number' &&
+      fixture.homeScoringStreak <= 3 &&
+      fixture.awayScoringStreak <= 3)
+    : fixtures
+  const shuffled = [...eligible]
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1))
     ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
@@ -444,7 +453,7 @@ function Workbench({ onOpenAdmin }: { onOpenAdmin: () => void }) {
     try {
       const liveResult = await fetchTodaysFixtures(start, end)
       const liveMatchups = liveResult.status === 'available'
-        ? selectLiveFixtures(liveResult.fixtures, count)
+        ? selectLiveFixtures(liveResult.fixtures, count, generatorMarket)
         : []
       const useLiveFixtures = liveMatchups.length > 0
       const fallbackKickoffTimes = useLiveFixtures ? [] : generateKickoffTimes(count, start, end)

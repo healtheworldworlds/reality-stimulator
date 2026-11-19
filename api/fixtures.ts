@@ -12,15 +12,119 @@ export interface FixturesResponse {
   };
 }
 
-function nonNegativeInteger(...values: unknown[]): number | undefined {
-  const value = values.find((candidate) =>
-    (typeof candidate === 'number' && Number.isInteger(candidate) && candidate >= 0) ||
-    (typeof candidate === 'string' && /^\d+$/.test(candidate.trim())),
-  );
-  return value === undefined ? undefined : Number(value);
+const UPSTREAM_TIMEOUT_MS = 10000
+const FIXTURE_CACHE_TTL_MS = 60_000
+let fixtureCache: { key: string; expiresAt: number; payload: unknown } | null = null
+
+type ApiFootballFixture = {
+  fixture?: { id?: number; date?: string; status?: { short?: string } }
+  league?: { name?: string }
+  teams?: {
+    home?: { id?: number; name?: string }
+    away?: { id?: number; name?: string }
+  }
+  goals?: { home?: number | null; away?: number | null }
 }
 
-const UPSTREAM_TIMEOUT_MS = 10000;
+function utcDate() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function apiFootballCredentials() {
+  const key = process.env.API_FOOTBALL_KEY || process.env.FOOTBALL_API_KEY || process.env.APISPORTS_API_KEY
+  if (!key) return null
+  const rapidHost = process.env.API_FOOTBALL_RAPIDAPI_HOST
+  const host = rapidHost || 'v3.football.api-sports.io'
+  return {
+    key,
+    baseUrl: `https://${host}`,
+    headers: rapidHost
+      ? { 'x-rapidapi-key': key, 'x-rapidapi-host': rapidHost }
+      : { 'x-apisports-key': key },
+  }
+}
+
+async function apiFootballGet(credentials: ReturnType<typeof apiFootballCredentials>, path: string) {
+  if (!credentials) throw new Error('API-Football credentials are not configured.')
+  const response = await fetch(`${credentials.baseUrl}${path}`, {
+    method: 'GET',
+    headers: { Accept: 'application/json', ...credentials.headers },
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  })
+  const payload = await response.json().catch(() => null) as {
+    errors?: unknown
+    response?: unknown
+  } | null
+  if (!response.ok) throw new Error(`API-Football returned HTTP ${response.status}.`)
+  if (payload?.errors && typeof payload.errors === 'object' && Object.keys(payload.errors).length > 0) {
+    throw new Error(`API-Football returned ${JSON.stringify(payload.errors)}.`)
+  }
+  return payload?.response ?? []
+}
+
+function scoringStreak(fixtures: unknown[], teamId: number): number | undefined {
+  const matches = fixtures as ApiFootballFixture[]
+  const ordered = matches
+    .filter((fixture) => fixture.fixture?.status?.short === 'FT')
+    .sort((left, right) =>
+      String(right.fixture?.date ?? '').localeCompare(String(left.fixture?.date ?? '')))
+  let streak = 0
+  for (const fixture of ordered) {
+    const isHome = fixture.teams?.home?.id === teamId
+    const goals = isHome ? fixture.goals?.home : fixture.teams?.away?.id === teamId ? fixture.goals?.away : null
+    if (typeof goals !== 'number' || goals <= 0) break
+    streak += 1
+  }
+  return ordered.length > 0 ? streak : undefined
+}
+
+async function mapApiFootballFixtures(date: string, credentials: NonNullable<ReturnType<typeof apiFootballCredentials>>) {
+  const response = await apiFootballGet(credentials, `/fixtures?date=${encodeURIComponent(date)}&timezone=UTC`)
+  if (!Array.isArray(response)) return []
+  const fixtures = response as ApiFootballFixture[]
+  const teamIds = [...new Set(fixtures.flatMap((fixture) =>
+    [fixture.teams?.home?.id, fixture.teams?.away?.id].filter((id): id is number => typeof id === 'number'),
+  ))].slice(0, 40)
+  const streaks = new Map<number, number>()
+  await Promise.all(teamIds.map(async (teamId) => {
+    try {
+      const recent = await apiFootballGet(credentials, `/fixtures?team=${teamId}&status=FT&last=5&timezone=UTC`)
+      const streak = scoringStreak(Array.isArray(recent) ? recent : [], teamId)
+      if (streak !== undefined) streaks.set(teamId, streak)
+    } catch {
+      // Missing streak data is intentionally excluded from goal markets.
+    }
+  }))
+
+  return fixtures.flatMap((fixture) => {
+    const fixtureId = fixture.fixture?.id
+    const kickoffDate = fixture.fixture?.date
+    const home = fixture.teams?.home
+    const away = fixture.teams?.away
+    if (!fixtureId || !kickoffDate || !home?.name || !away?.name) return []
+    if (fixture.fixture?.status?.short && !['NS', 'TBD'].includes(fixture.fixture.status.short)) return []
+    const homeStreak = typeof home.id === 'number' ? streaks.get(home.id) : undefined
+    const awayStreak = typeof away.id === 'number' ? streaks.get(away.id) : undefined
+    const d = new Date(kickoffDate)
+    const hours = String(d.getUTCHours()).padStart(2, '0')
+    const mins = String(d.getUTCMinutes()).padStart(2, '0')
+    return [{
+      id: String(fixtureId),
+      generatedId: String(fixtureId),
+      kickoff: `${hours}:${mins} GMT`,
+      kickoffDate: d.toISOString(),
+      status: 'NS',
+      competition: fixture.league?.name || 'API-Football Match',
+      home: home.name,
+      away: away.name,
+      ...(homeStreak !== undefined && awayStreak !== undefined
+        ? { homeScoringStreak: homeStreak, awayScoringStreak: awayStreak, streakDataAvailable: true }
+        : {}),
+      teams: { home: home.name, away: away.name },
+      source: 'api-football',
+    }]
+  })
+}
 
 export default async function fixturesHandler(request: FixturesRequest, response: FixturesResponse) {
   response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=90, stale-while-revalidate=180');
@@ -32,95 +136,36 @@ export default async function fixturesHandler(request: FixturesRequest, response
   }
 
   try {
-    // SportyBet mobile endpoint with explicit headers
-    const sportyUrl = 'https://www.sportybet.com/api/gh/factsCenter/pcUpcomingEvents?sportId=sr:sport:1&_t=' + Date.now();
-    
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
-
-    let upstream: Response;
-    try {
-      upstream = await fetch(sportyUrl, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-          'Accept': 'application/json, text/plain, */*',
-          'Referer': 'https://www.sportybet.com/gh/m/sport/football',
-          'Origin': 'https://www.sportybet.com'
-        },
-        signal: controller.signal
-      });
-    } finally {
-      clearTimeout(timer);
+    const date = typeof request.query?.date === 'string' ? request.query.date : utcDate()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return response.status(400).json({ status: 'fallback', error: 'date must use YYYY-MM-DD.' })
     }
-
-    if (!upstream.ok) {
-      return response.status(502).json({ status: 'fallback', error: `SportyBet returned ${upstream.status}` });
+    const cacheKey = `fixtures:${date}`
+    const now = Date.now()
+    if (fixtureCache?.key === cacheKey && fixtureCache.expiresAt > now) {
+      return response.status(200).json(fixtureCache.payload)
     }
-
-    const data: any = await upstream.json();
-    const tournaments = data?.data?.tournaments || [];
-    const mapped: any[] = [];
-    const nowMs = Date.now();
-
-    for (const t of tournaments) {
-      for (const e of (t.events || [])) {
-        if (e.eventId && e.status === 'not_started') {
-          const startMs = e.estimateStartTime || nowMs;
-          if (startMs >= nowMs) {
-            const d = new Date(startMs);
-            const hours = String(d.getUTCHours()).padStart(2, '0');
-            const mins = String(d.getUTCMinutes()).padStart(2, '0');
-            const homeScoringStreak = nonNegativeInteger(
-              e.homeScoringStreak,
-              e.homeGoalStreak,
-              e.homeTeam?.scoringStreak,
-              e.homeTeam?.goalStreak,
-            );
-            const awayScoringStreak = nonNegativeInteger(
-              e.awayScoringStreak,
-              e.awayGoalStreak,
-              e.awayTeam?.scoringStreak,
-              e.awayTeam?.goalStreak,
-            );
-
-            let over15Odd = 0;
-            for (const m of (e.markets || [])) {
-              if (m.specifier === 'total=1.5' || (m.desc && m.desc.includes('1.5'))) {
-                const over = (m.outcomes || []).find((o: any) => o.desc === 'Over' || o.id === '12');
-                if (over?.odds) over15Odd = parseFloat(over.odds);
-              }
-            }
-
-            mapped.push({
-              id: String(e.eventId),
-              generatedId: String(e.eventId),
-              kickoff: `${hours}:${mins} GMT`,
-              kickoffDate: new Date(startMs).toISOString(),
-              status: 'NS',
-              competition: t.name || 'SportyBet Match',
-              home: e.homeTeamName || 'Home',
-              away: e.awayTeamName || 'Away',
-              sportyOdd: over15Odd > 0 ? over15Odd : undefined,
-              ...(homeScoringStreak !== undefined && awayScoringStreak !== undefined
-                ? { homeScoringStreak, awayScoringStreak, streakDataAvailable: true }
-                : {}),
-              teams: {
-                home: e.homeTeamName || 'Home',
-                away: e.awayTeamName || 'Away'
-              }
-            });
-          }
-        }
-      }
+    const credentials = apiFootballCredentials()
+    if (!credentials) {
+      return response.status(503).json({
+        status: 'fallback',
+        response: [],
+        error: 'API-Football is not configured. Set API_FOOTBALL_KEY or FOOTBALL_API_KEY.',
+      })
     }
-
+    const mapped = await mapApiFootballFixtures(date, credentials)
     if (mapped.length > 0) {
-      return response.status(200).json({ status: 'available', response: mapped, source: 'sportybet' });
+      const payload = { status: 'available', response: mapped, source: 'api-football', date }
+      fixtureCache = { key: cacheKey, expiresAt: now + FIXTURE_CACHE_TTL_MS, payload }
+      return response.status(200).json(payload)
     }
-
-    return response.status(200).json({ status: 'fallback', response: [], error: 'No upcoming events found on SportyBet' });
-  } catch (err: any) {
-    return response.status(500).json({ status: 'fallback', error: err.message || 'Error fetching from SportyBet' });
+    return response.status(200).json({
+      status: 'fallback',
+      response: [],
+      error: `No upcoming fixtures returned by API-Football for ${date}.`,
+    })
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Error fetching API-Football fixtures.'
+    return response.status(502).json({ status: 'fallback', error: message })
   }
 }

@@ -24,7 +24,7 @@ The matrix is normalized before deriving 1X2, Over/Under 1.5 and 2.5, and BTTS p
 
 ## Fixture generator
 
-The Automated Match Generator requests today's fixtures from the same-origin `/api/fixtures` Vercel serverless endpoint. The endpoint reads upcoming football events from SportyBet Ghana and returns normalized fixture fields. If SportyBet is unavailable or returns no events, the browser falls back to the checked-in fixture sample and then to unscheduled pairings from the internal club registry. Use `vercel dev` to run the serverless endpoint locally.
+The Automated Match Generator requests today's fixtures from the same-origin `/api/fixtures` Vercel serverless endpoint. The endpoint now reads live fixtures from API-Football and enriches each match with recent completed-match scoring streaks for both teams. Configure `API_FOOTBALL_KEY` or `FOOTBALL_API_KEY`; RapidAPI deployments can use `API_FOOTBALL_RAPIDAPI_HOST` plus the RapidAPI key in `API_FOOTBALL_KEY`. If API-Football is unavailable or returns no fixtures, the browser first uses the static fallback pool and then unscheduled registry pairings. Use `vercel dev` to run the serverless endpoint locally.
 
 The endpoint's rate limit and cache are in-memory best-effort protections and may reset when serverless instances restart or scale. Use a shared store such as Redis/KV if a deployment needs globally coordinated limits or caching.
 
