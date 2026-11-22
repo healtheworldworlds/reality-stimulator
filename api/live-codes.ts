@@ -255,6 +255,9 @@ function extractCodes(text: string): Array<{ bookie: Bookie, code: string }> {
   for (const { code: rawCode, index, explicit } of [...explicitMatches, ...standaloneMatches]) {
     const code = rawCode.toUpperCase()
     if (explicit ? !isValidExplicitCode(code) : !isValidCode(code)) continue
+    // Filter out codes that are emoji-only or consist of repeated characters (junk from image filenames like F09F9189)
+    const isJunkCode = (code: string) => /^[^\p{L}\p{N}]+$/u.test(code) || /^(.)\1{5,}$/u.test(code) || code.length > 12
+    if (isJunkCode(code)) continue
     const before = text.slice(Math.max(0, index - 40), index)
     const labeledSportyBet = /sporty\s*bet/i.test(before)
     if (labeledSportyBet || code.length <= 8) found.set(code, 'sportybet')

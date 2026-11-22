@@ -13,7 +13,7 @@ const getArg = (key, fallback) => {
 const LEGS = parseInt(getArg('legs', '14'), 10);
 const SLIPS = parseInt(getArg('slips', '7'), 10);
 const DAY = getArg('day', 'Today'); // 'Today' or 'Tomorrow'
-const MARKET = getArg('market', 'OVER_1_5');
+const MARKET = getArg('market', 'OVER_1_5') as const;
 const OUT_FILE = 'generated_codes.txt';
 const MANIFEST_FILE = 'generated_slips.jsonl';
 const MAX_SCROLL_ATTEMPTS = 45;
@@ -32,6 +32,9 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
 
 (async () => {
   console.log(`Starting Stable Slip Generator: Day=${DAY}, Market=${MARKET}, Legs=${LEGS}, Slips=${SLIPS}...`);
+  if (process.env.HEADFUL !== '1' && !process.env.CI) {
+    console.warn('HEADFUL not set and not CI: launching headless. Use HEADFUL=1 for interactive mode.');
+  }
   fs.writeFileSync(OUT_FILE, '');
   fs.writeFileSync(MANIFEST_FILE, '');
   let marketKeys;
@@ -90,7 +93,7 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
   };
   let browser;
   try {
-    browser = await chromium.launch({ headless: process.env.HEADFUL !== '1', slowMo: process.env.CI ? 0 : 70 });
+    browser = await chromium.launch({ headless: process.env.HEADFUL !== '1' || process.env.CI === 'true', slowMo: process.env.CI ? 0 : 70 });
   } catch (error) {
     console.error(`Could not launch Playwright: ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;
@@ -255,6 +258,7 @@ if (!Number.isInteger(LEGS) || LEGS < 1 || !Number.isInteger(SLIPS) || SLIPS < 1
   } catch (err) {
     console.error(`Script error: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;
+    throw err; // re-throw to ensure exit code is properly set
   } finally {
     for (const [reason, count] of filterReasons) console.log(`FILTERED ${count} candidates: ${reason}`);
     await browser.close();

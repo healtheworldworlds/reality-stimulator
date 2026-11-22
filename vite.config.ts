@@ -35,7 +35,7 @@ export default defineConfig(({ mode }) => {
     build: {
       sourcemap: false,
     },
-    server: { headers },
+    server: { headers, proxy: { '/api': 'http://localhost:5000' } },
     preview: { headers: { ...baseSecurityHeaders, 'Content-Security-Policy': contentSecurityPolicy } },
   }
 })

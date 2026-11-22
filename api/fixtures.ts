@@ -102,7 +102,8 @@ async function mapApiFootballFixtures(date: string, credentials: NonNullable<Ret
     const home = fixture.teams?.home
     const away = fixture.teams?.away
     if (!fixtureId || !kickoffDate || !home?.name || !away?.name) return []
-    if (fixture.fixture?.status?.short && !['NS', 'TBD'].includes(fixture.fixture.status.short)) return []
+    const statusShort = fixture.fixture?.status?.short
+  if (!statusShort || String(statusShort) === '0' || ['NS', 'TBD'].includes(String(statusShort))) return []
     const homeStreak = typeof home.id === 'number' ? streaks.get(home.id) : undefined
     const awayStreak = typeof away.id === 'number' ? streaks.get(away.id) : undefined
     const d = new Date(kickoffDate)
@@ -127,7 +128,7 @@ async function mapApiFootballFixtures(date: string, credentials: NonNullable<Ret
 }
 
 export default async function fixturesHandler(request: FixturesRequest, response: FixturesResponse) {
-  response.setHeader('Cache-Control', 'public, max-age=60, s-maxage=90, stale-while-revalidate=180');
+  response.setHeader('Cache-Control', 'no-store, must-revalidate');
   response.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (request.method !== 'GET') {
@@ -137,10 +138,12 @@ export default async function fixturesHandler(request: FixturesRequest, response
 
   try {
     const date = typeof request.query?.date === 'string' ? request.query.date : utcDate()
+    const pageSize = typeof request.query?.pageSize === 'string' ? parseInt(request.query.pageSize, 10) : 20
+    const pageNum = typeof request.query?.pageNum === 'string' ? parseInt(request.query.pageNum, 10) : 1
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return response.status(400).json({ status: 'fallback', error: 'date must use YYYY-MM-DD.' })
     }
-    const cacheKey = `fixtures:${date}`
+    const cacheKey = `fixtures:${date}:${pageNum}:${pageSize}`
     const now = Date.now()
     if (fixtureCache?.key === cacheKey && fixtureCache.expiresAt > now) {
       return response.status(200).json(fixtureCache.payload)
@@ -154,8 +157,16 @@ export default async function fixturesHandler(request: FixturesRequest, response
       })
     }
     const mapped = await mapApiFootballFixtures(date, credentials)
-    if (mapped.length > 0) {
-      const payload = { status: 'available', response: mapped, source: 'api-football', date }
+    // Filter by status: only include fixtures that have started (not 'NS' or 'TBD')
+    const filtered = mapped.filter((f) => {
+      const statusShort = f.status
+      // 'NS' = not started, 'TBD' = to be decided; exclude these (treat as numeric 0 filter)
+      if (!statusShort) return false
+      return !['NS', 'TBD'].includes(statusShort)
+    })
+    const paginated = filtered.slice((pageNum - 1) * pageSize, pageNum * pageSize)
+    if (paginated.length > 0) {
+      const payload = { status: 'available', response: paginated, source: 'api-football', date, pageNum, pageSize }
       fixtureCache = { key: cacheKey, expiresAt: now + FIXTURE_CACHE_TTL_MS, payload }
       return response.status(200).json(payload)
     }
@@ -166,6 +177,7 @@ export default async function fixturesHandler(request: FixturesRequest, response
     })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Error fetching API-Football fixtures.'
-    return response.status(502).json({ status: 'fallback', error: message })
+    // Don't cache errors - return immediately without Cache-Control caching
+    return response.status(502).json({ status: 'fallback', error: message, _ephemeral: true })
   }
 }

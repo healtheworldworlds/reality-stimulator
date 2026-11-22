@@ -19,10 +19,16 @@ on:
         description: 'Legs per slip'
         required: true
         default: '14'
+        type: integer
       slips:
         description: 'Total slips count'
         required: true
         default: '5'
+        type: integer
+      day:
+        description: 'Day (Today or Tomorrow)'
+        required: false
+        default: 'Today'
 
 jobs:
   run-worker:
@@ -51,7 +57,7 @@ jobs:
           LIVE_CODES_ENDPOINT: ${{ secrets.LIVE_CODES_ENDPOINT }}
           LIVE_CODES_ADMIN_KEY: ${{ secrets.ADMIN_MASTER_KEY }}
         run: |
-          node scripts/generate-slips.js --market=${{ inputs.market }} --legs=${{ inputs.legs }} --slips=${{ inputs.slips }}
+          node scripts/generate-slips.js --market=${{ inputs.market }} --legs=${{ inputs.legs }} --slips=${{ inputs.slips }} --day=${{ inputs.day || 'Today' }}
 
       - name: Upload Generated Codes
         uses: actions/upload-artifact@v4

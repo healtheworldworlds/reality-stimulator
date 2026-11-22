@@ -26,13 +26,6 @@ export interface FixtureFetchResult {
   reason?: string
 }
 
-type FixturesApiResponse = {
-  status?: 'available' | 'fallback'
-  response?: LiveFixture[]
-  error?: string
-  source?: string
-}
-
 function noFixturesFallback(reason: string): FixtureFetchResult {
   return {
     status: 'fallback',
@@ -44,11 +37,11 @@ function noFixturesFallback(reason: string): FixtureFetchResult {
 export async function fetchTodaysFixtures(_start?: unknown, _end?: unknown): Promise<FixtureFetchResult> {
   try {
     const date = new Date().toISOString().slice(0, 10)
-    const response = await fetch(`/api/fixtures?date=${date}`, {
+    const response = await fetch(`/api/fixtures?date=${date}&pageSize=20&pageNum=1`, {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
-    const payload = await response.json().catch(() => null) as FixturesApiResponse | null
+    const payload = await response.json().catch(() => null) as { status?: string; response?: any[]; error?: string; pageNum?: number; pageSize?: number } | null
     if (response.ok && payload?.status === 'available' && Array.isArray(payload.response) && payload.response.length > 0) {
       return { status: 'available', fixtures: payload.response }
     }
