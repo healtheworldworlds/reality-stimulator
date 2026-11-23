@@ -72,7 +72,10 @@ function channelList() {
   const config = readJson(CONFIG_FILE);
   const list = Array.isArray(config) ? config : config?.channels;
   if (Array.isArray(list)) {
-    return unique(list.flatMap((entry) => splitChannelEntries(entry)));
+    return unique(list.flatMap((entry) => {
+      if (typeof entry === 'string') return splitChannelEntries(entry);
+      return splitChannelEntries(entry?.slug);
+    }));
   }
 
   return [];
@@ -175,6 +178,22 @@ function extractCaption(segmentHtml) {
   return match ? stripHtml(match[1]) : '';
 }
 
+function extractSpiderCandidates(html) {
+  const found = new Set();
+  const filtered = new Set(['share', 'joinchat', 'addstickers', 's', 'iv', 'c', 'proxy']);
+  const patterns = [
+    /https?:\/\/(?:www\.)?t\.me\/(?:s\/)?([A-Za-z0-9_]{4,64})/gi,
+    /\b@([A-Za-z0-9_]{4,64})\b/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of html.matchAll(pattern)) {
+      const slug = match[1];
+      if (!filtered.has(slug.toLowerCase())) found.add(slug);
+    }
+  }
+  return [...found];
+}
+
 function extractCodes(text) {
   return extractTaggedCodes(text);
 }
@@ -204,6 +223,8 @@ channels = [...new Set(channels)];
   const newlyFoundSet = new Set();
   const seenImageSet = new Set(seen.imageUrls);
   const seenMessageSet = new Set(seen.messageIds);
+  const spiderCandidates = new Set(channels);
+  let activeChannels = 0;
   let worker;
   let workerCreated = false;
 
@@ -219,6 +240,9 @@ channels = [...new Set(channels)];
         console.error(`Failed to fetch ${channel}: ${error.message}`);
         continue;
       }
+      const captionCandidates = extractSpiderCandidates(html);
+      for (const candidate of captionCandidates) spiderCandidates.add(candidate);
+      activeChannels += 1;
 
       const segments = extractMessageSegments(html);
       const fallbackImages = extractImageUrls(html);
@@ -254,6 +278,7 @@ channels = [...new Set(channels)];
               newlyFound.push(record);
               newlyFoundSet.add(record.code);
             }
+            for (const candidate of extractSpiderCandidates(result.data.text || '')) spiderCandidates.add(candidate);
           }
           seenImageSet.add(imageUrl);
           console.log(`OCR scanned ${imageUrl}`);
@@ -264,6 +289,10 @@ channels = [...new Set(channels)];
 
       for (const segment of segments) {
         if (seenMessageSet.has(segment.messageId)) continue;
+
+        const forwardMatch = segment.html.match(/tgme_widget_message_forwarded_from[\s\S]*?t\.me\/([A-Za-z0-9_]{4,64})/i);
+        if (forwardMatch) spiderCandidates.add(forwardMatch[1]);
+        for (const candidate of extractSpiderCandidates(segment.html)) spiderCandidates.add(candidate);
 
         const caption = extractCaption(segment.html);
         for (const record of extractTaggedCodes(caption, isValidationEnabled(args))) {
@@ -308,5 +337,19 @@ channels = [...new Set(channels)];
     imageUrls: [...seenImageSet],
     messageIds: [...seenMessageSet],
   });
-  console.log(`Found ${newlyFound.length} new code(s) across ${channels.length} channel(s).`);
+  const now = new Date().toISOString();
+  const existingConfig = readJson(CONFIG_FILE);
+  const existingRecords = Array.isArray(existingConfig) ? existingConfig : [];
+  const bySlug = new Map(existingRecords
+    .map((entry) => typeof entry === 'string'
+      ? { slug: entry, bookmaker: 'both', lastChecked: null, codesFound: 0 }
+      : entry)
+    .filter((entry) => entry?.slug)
+    .map((entry) => [entry.slug, entry]));
+  for (const slug of spiderCandidates) {
+    const prior = bySlug.get(slug) ?? { slug, bookmaker: 'both', lastChecked: null, codesFound: 0 };
+    bySlug.set(slug, { ...prior, lastChecked: now });
+  }
+  fs.writeFileSync(CONFIG_FILE, `${JSON.stringify([...bySlug.values()], null, 2)}\n`, 'utf8');
+  console.log(`Scrape summary: ${activeChannels} active channel(s) scraped; ${spiderCandidates.size} candidate channel(s) queued; ${newlyFound.length} new code(s) found.`);
 }
