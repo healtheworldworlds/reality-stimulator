@@ -13,7 +13,7 @@ const getArg = (key, fallback) => {
 const LEGS = parseInt(getArg('legs', '14'), 10);
 const SLIPS = parseInt(getArg('slips', '7'), 10);
 const DAY = getArg('day', 'Today'); // 'Today' or 'Tomorrow'
-const MARKET = getArg('market', 'OVER_1_5') as const;
+const MARKET = getArg('market', 'OVER_1_5');
 const OUT_FILE = 'generated_codes.txt';
 const MANIFEST_FILE = 'generated_slips.jsonl';
 const MAX_SCROLL_ATTEMPTS = 45;
