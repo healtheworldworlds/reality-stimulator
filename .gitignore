@@ -34,3 +34,8 @@ telegram-channels.json
 
 # Local scratch scripts, captured outputs and session dumps (never commit)
 .sandbox/
+
+eng.traineddata
+seen_tg_*.json
+telegram_ocr_codes.txt
+telegram-channels.json
