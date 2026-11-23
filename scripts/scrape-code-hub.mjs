@@ -22,7 +22,9 @@ function parseCodeHubText(text) {
     const match = line.match(blockPattern);
     if (!match) continue;
     const code = match[2].toUpperCase();
-    const record = normalizeCodeDiscovery(code, 'sportybet', 'code-hub');
+    const record = normalizeCodeDiscovery(code, 'sportybet', 'code-hub', {
+      allowForValidation: isValidationEnabled(args),
+    });
     if (!record) continue;
     const context = lines.slice(Math.max(0, index - 2), Math.min(lines.length, index + 3)).join(' ');
     const foldMatch = context.match(/(?:fold|legs?|selections?)\s*[:\-]?\s*(\d{1,3})/i);

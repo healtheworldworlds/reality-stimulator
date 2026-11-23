@@ -20,8 +20,13 @@ function loadLocalEnv(root) {
 
 export function normalizeCodeDiscovery(code, bookmaker, source = 'telegram', extra = {}) {
   const value = String(code ?? '').trim().toUpperCase();
-  if (bookmaker === 'sportybet' && !/^[A-Z0-9]{6}$/.test(value)) return null;
-  if (bookmaker === 'betway' && !/^BW[A-Z0-9]{6}$/.test(value)) return null;
+  if (bookmaker === 'sportybet') {
+    if (!/^[A-Z0-9]{6}$/.test(value)) return null;
+    if (!/\d/.test(value) && extra.verified !== true && extra.allowForValidation !== true) return null;
+  }
+  if (bookmaker === 'betway') {
+    if (!/^BW[A-Z0-9]{6}$/.test(value) || !/[0-9]/.test(value.slice(2))) return null;
+  }
   if (!['sportybet', 'betway'].includes(bookmaker)) return null;
   return {
     code: value,
@@ -31,11 +36,13 @@ export function normalizeCodeDiscovery(code, bookmaker, source = 'telegram', ext
   };
 }
 
-export function extractTaggedCodes(text) {
+export function extractTaggedCodes(text, allowForValidation = false) {
   const clean = String(text ?? '').replace(/https?:\/\/\S+/gi, ' ').toUpperCase();
   const found = [];
   for (const match of clean.matchAll(/\bBW[A-Z0-9]{6}\b/g)) {
-    found.push(normalizeCodeDiscovery(match[0], 'betway'));
+    if (/[0-9]/.test(match[0].slice(2))) {
+      found.push(normalizeCodeDiscovery(match[0], 'betway'));
+    }
   }
   const common = new Set([
     'SPORTY', 'DOUBLE', 'CHANCE', 'BETWAY', 'SINGLE', 'TICKET', 'WINNER', 'ONLINE',
@@ -43,7 +50,9 @@ export function extractTaggedCodes(text) {
     'WINNING', 'PREDICT', 'VOUCHER', 'BOOKING', 'CODE', 'BETS',
   ]);
   for (const match of clean.matchAll(/\b[A-Z0-9]{6}\b/g)) {
-    if (!common.has(match[0])) found.push(normalizeCodeDiscovery(match[0], 'sportybet'));
+    if (!common.has(match[0])) {
+      found.push(normalizeCodeDiscovery(match[0], 'sportybet', 'telegram', { allowForValidation }));
+    }
   }
   return deduplicateDiscoveries(found);
 }
@@ -63,7 +72,9 @@ export async function mergeDiscoveryOutput(root, records) {
   const generatedFile = path.join(root, 'generated_codes.txt');
   const manifestFile = path.join(root, 'generated_slips.jsonl');
   const existingCodes = fs.existsSync(generatedFile)
-    ? fs.readFileSync(generatedFile, 'utf8').split(/\r?\n/).map((line) => line.trim().toUpperCase()).filter(Boolean)
+    ? fs.readFileSync(generatedFile, 'utf8').split(/\r?\n/).map((line) => line.trim().toUpperCase()).filter((code) =>
+      /^BW[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code.slice(2))
+      || /^[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code))
     : [];
   const allRecords = deduplicateDiscoveries([
     ...existingCodes.map((code) => normalizeCodeDiscovery(
@@ -81,7 +92,13 @@ export async function mergeDiscoveryOutput(root, records) {
   const existingManifest = fs.existsSync(manifestFile)
     ? fs.readFileSync(manifestFile, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => {
       try { return JSON.parse(line); } catch { return null; }
-    }).filter(Boolean)
+    }).filter((entry) => {
+      if (!entry || typeof entry.code !== 'string') return false;
+      const code = entry.code.toUpperCase();
+      if (entry.bookie === 'betway:gh') return /^BW[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code.slice(2));
+      if (entry.bookie === 'sportybet:gh') return /^[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code);
+      return false;
+    })
     : [];
   const manifestKeys = new Set(existingManifest.map((entry) => `${entry.bookie}:${entry.code}`));
   const timestamp = new Date().toISOString();

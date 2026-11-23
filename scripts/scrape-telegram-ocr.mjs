@@ -247,7 +247,7 @@ if (!channels.length) {
             .png()
             .toBuffer();
           const result = await worker.recognize(processed);
-          for (const record of extractTaggedCodes(result.data.text || '')) {
+          for (const record of extractTaggedCodes(result.data.text || '', isValidationEnabled(args))) {
             if (!telegramSet.has(record.code) && !newlyFoundSet.has(record.code)) {
               newlyFound.push(record);
               newlyFoundSet.add(record.code);
@@ -264,7 +264,7 @@ if (!channels.length) {
         if (seenMessageSet.has(segment.messageId)) continue;
 
         const caption = extractCaption(segment.html);
-        for (const record of extractCodes(caption)) {
+        for (const record of extractTaggedCodes(caption, isValidationEnabled(args))) {
           if (!telegramSet.has(record.code) && !newlyFoundSet.has(record.code)) {
             newlyFound.push(record);
             newlyFoundSet.add(record.code);
