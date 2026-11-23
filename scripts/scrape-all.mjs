@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { discoverTelegramChannels } from './discover-telegram-channels.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+await discoverTelegramChannels();
 const scripts = [
   ['scrape-code-hub.mjs', process.argv.slice(2)],
   ['scrape-telegram-ocr.mjs', process.argv.slice(2)],

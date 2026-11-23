@@ -10,6 +10,7 @@ import {
   isValidationEnabled,
   validateDiscoveredCodes,
 } from './code-discovery.js';
+import { discoverTelegramChannels } from './discover-telegram-channels.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SEEN_FILE = path.join(ROOT, 'seen_tg_images.json');
@@ -190,11 +191,12 @@ async function fetchHtml(url) {
   return response.text();
 }
 
-const channels = channelList();
-if (!channels.length) {
-  console.error('No Telegram channels configured. Use --channels=channel1,channel2, TELEGRAM_CHANNELS, or telegram-channels.json.');
-  process.exitCode = 1;
-} else {
+let channels = channelList();
+if (!channels.length) channels = await discoverTelegramChannels();
+if (!channels.includes('SportybetOfficialChannel')) channels.unshift('SportybetOfficialChannel');
+channels = [...new Set(channels)];
+
+{
   const seen = readSeenState();
   const telegramExisting = readLines(CODES_FILE);
   const telegramSet = new Set(telegramExisting);

@@ -10,6 +10,8 @@
     "scrape:telegram": "node scripts/scrape-telegram-ocr.mjs",
     "scrape:code-hub": "node scripts/scrape-code-hub.mjs",
     "scrape:all": "node scripts/scrape-all.mjs",
+    "discover:telegram": "node scripts/discover-telegram-channels.mjs",
+    "schedule:install": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-scheduler.ps1",
     "scrape:telegram:validate": "node scripts/scrape-telegram-ocr.mjs --validate",
     "scrape:code-hub:validate": "node scripts/scrape-code-hub.mjs --validate",
     "book:2h": "node scripts/generate-slips.js --market=2H_HIGHEST --legs=14 --slips=100",
