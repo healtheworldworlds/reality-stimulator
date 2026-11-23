@@ -297,7 +297,7 @@ if (!channels.length) {
 
   let outputRecords = newlyFound;
   if (isValidationEnabled(args)) outputRecords = await validateDiscoveredCodes(outputRecords);
-  mergeDiscoveryOutput(ROOT, outputRecords);
+  await mergeDiscoveryOutput(ROOT, outputRecords);
   if (mergeGenerated || !mergeGenerated) {
     console.log(`Merged codes into ${path.basename(GENERATED_FILE)} and generated_slips.jsonl.`);
   }

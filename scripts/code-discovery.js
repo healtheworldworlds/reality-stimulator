@@ -3,10 +3,25 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { chromium } from 'playwright';
 
+function loadLocalEnv(root) {
+  const envFile = path.join(root, '.env');
+  if (!fs.existsSync(envFile)) return;
+  for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+    const match = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!match || process.env[match[1]] !== undefined) continue;
+    const key = match[1];
+    let value = match[2];
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    process.env[key] = value;
+  }
+}
+
 export function normalizeCodeDiscovery(code, bookmaker, source = 'telegram', extra = {}) {
   const value = String(code ?? '').trim().toUpperCase();
   if (bookmaker === 'sportybet' && !/^[A-Z0-9]{6}$/.test(value)) return null;
-  if (bookmaker === 'betway' && !/^BW(?:[A-Z0-9]{6}|[A-Z0-9]{8})$/.test(value)) return null;
+  if (bookmaker === 'betway' && !/^BW[A-Z0-9]{6}$/.test(value)) return null;
   if (!['sportybet', 'betway'].includes(bookmaker)) return null;
   return {
     code: value,
@@ -19,7 +34,7 @@ export function normalizeCodeDiscovery(code, bookmaker, source = 'telegram', ext
 export function extractTaggedCodes(text) {
   const clean = String(text ?? '').replace(/https?:\/\/\S+/gi, ' ').toUpperCase();
   const found = [];
-  for (const match of clean.matchAll(/\bBW(?:[A-Z0-9]{6}|[A-Z0-9]{8})\b/g)) {
+  for (const match of clean.matchAll(/\bBW[A-Z0-9]{6}\b/g)) {
     found.push(normalizeCodeDiscovery(match[0], 'betway'));
   }
   const common = new Set([
@@ -43,7 +58,8 @@ export function deduplicateDiscoveries(records) {
   });
 }
 
-export function mergeDiscoveryOutput(root, records) {
+export async function mergeDiscoveryOutput(root, records) {
+  loadLocalEnv(root);
   const generatedFile = path.join(root, 'generated_codes.txt');
   const manifestFile = path.join(root, 'generated_slips.jsonl');
   const existingCodes = fs.existsSync(generatedFile)
@@ -52,7 +68,7 @@ export function mergeDiscoveryOutput(root, records) {
   const allRecords = deduplicateDiscoveries([
     ...existingCodes.map((code) => normalizeCodeDiscovery(
       code,
-      /^BW(?:[A-Z0-9]{6}|[A-Z0-9]{8})$/.test(code) ? 'betway' : 'sportybet',
+      /^BW[A-Z0-9]{6}$/.test(code) ? 'betway' : 'sportybet',
       'existing',
     )),
     ...records,
@@ -94,7 +110,57 @@ export function mergeDiscoveryOutput(root, records) {
   fs.writeFileSync(manifestFile, existingManifest.length
     ? `${existingManifest.map((entry) => JSON.stringify(entry)).join('\n')}\n`
     : '', 'utf8');
+  await publishNewDiscoveries(root, records);
   return allRecords;
+}
+
+export async function publishNewDiscoveries(root, records, args = process.argv.slice(2)) {
+  loadLocalEnv(root);
+  const endpoint = args.includes('--no-publish')
+    ? ''
+    : (process.env.LIVE_CODES_ENDPOINT?.trim()
+      || 'https://www.realitysimulator.live/api/live-codes');
+  const adminKey = process.env.LIVE_CODES_ADMIN_KEY?.trim()
+    || process.env.ADMIN_MASTER_KEY?.trim();
+  if (!endpoint || !adminKey) return [];
+
+  const published = [];
+  for (const record of deduplicateDiscoveries(records).filter((item) => item.source !== 'existing')) {
+    const legs = Array.isArray(record.legs) ? record.legs : [];
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'x-admin-key': adminKey,
+        },
+        body: JSON.stringify({
+          code: record.code,
+          bookie: record.bookmaker,
+          countryCode: 'GHANA',
+          channel: record.source === 'code-hub' ? 'sportybet-code-hub' : record.channel || 'telegram-ocr',
+          source: record.source === 'manual' ? 'manual' : 'generated',
+          time: record.timestamp || new Date().toISOString(),
+          legs,
+          foldCount: record.foldCount ?? null,
+          combinedOdds: record.combinedOdds ?? record.odds ?? null,
+          verified: record.verified === true,
+          ocr: record.source === 'telegram',
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        console.error(`Live publish failed for ${record.bookmaker}/${record.code}: ${payload?.error || `HTTP ${response.status}`}`);
+        continue;
+      }
+      published.push(record);
+    } catch (error) {
+      console.error(`Live publish failed for ${record.bookmaker}/${record.code}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return published;
 }
 
 export function isValidationEnabled(args) {

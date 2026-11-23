@@ -6,10 +6,11 @@ type LiveCode = {
   code: string
   odds: number | null
   time: string
-  bookie: 'sportybet'
+  bookie: 'sportybet' | 'betway'
   channel: string
   countryCode?: 'GHANA'
   source?: 'telegram' | 'generated' | 'manual'
+  ocr?: boolean
   legs?: Array<{ market: string; pick: string; odds: number }>
 }
 
@@ -18,6 +19,7 @@ type FeedPayload = {
   error?: string
   updatedAt?: string
   sportybet?: LiveCode[]
+  betway?: LiveCode[]
   warnings?: string[]
 }
 
@@ -37,6 +39,7 @@ export function LiveCodesHub() {
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [bookmaker, setBookmaker] = useState<'sportybet' | 'betway'>('sportybet')
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -85,8 +88,8 @@ export function LiveCodesHub() {
     }
   }
 
-  const items = (feed?.sportybet ?? []).filter((item) =>
-    item.bookie === 'sportybet' && (item.countryCode ?? 'GHANA') === 'GHANA')
+  const items = ((bookmaker === 'sportybet' ? feed?.sportybet : feed?.betway) ?? []).filter((item) =>
+    item.bookie === bookmaker && (item.countryCode ?? 'GHANA') === 'GHANA')
 
   return (
     <section className="live-codes" aria-labelledby="live-codes-heading">
@@ -95,7 +98,8 @@ export function LiveCodesHub() {
       </div>
       <div className="live-codes__toolbar">
         <div className="live-codes__tabs" aria-label="Country and bookmaker">
-          <span className="live-codes__tab is-active">SportyBet GH</span>
+          <button className={`live-codes__tab ${bookmaker === 'sportybet' ? 'is-active' : ''}`} type="button" onClick={() => setBookmaker('sportybet')}>SportyBet GH</button>
+          <button className={`live-codes__tab ${bookmaker === 'betway' ? 'is-active' : ''}`} type="button" onClick={() => setBookmaker('betway')}>Betway GH</button>
         </div>
         <button className="quiet-button" type="button" onClick={() => void refresh()} disabled={loading}>
           <RefreshCw size={12} className={loading ? 'is-spinning' : undefined} /> Refresh Feed
@@ -105,20 +109,22 @@ export function LiveCodesHub() {
         <input type="checkbox" checked={autoRefresh} onChange={(event) => setAutoRefresh(event.target.checked)} />
         Auto-refresh every 60 seconds
       </label>
-      <p className="live-codes__guide">Available booking codes for SportyBet Ghana (GH) only.</p>
+      <p className="live-codes__guide">Available booking codes for {bookmaker === 'sportybet' ? 'SportyBet' : 'Betway'} Ghana (GH).</p>
       {error && <p className="live-codes__error" role="alert">{error}</p>}
       {feed?.warnings?.map((warning) => <p className="live-codes__warning" key={warning}>Some channels could not refresh: {warning}</p>)}
-      {!error && !loading && items.length === 0 && <p className="live-codes__empty">No SportyBet GH codes found right now.</p>}
+      {!error && !loading && items.length === 0 && <p className="live-codes__empty">No {bookmaker === 'sportybet' ? 'SportyBet' : 'Betway'} GH codes found right now.</p>}
       <ul className="live-codes__list">
         {items.map((item) => (
           <li className="live-code" key={item.id}>
             <div className="live-code__main">
               <strong className="live-code__code">{item.code}</strong>
+              <span className="live-code__country">{item.bookie === 'sportybet' ? 'SPORTYBET' : 'BETWAY'} GH</span>
               <span className="live-code__country">
                 {item.countryCode ?? 'GHANA'}
               </span>
               {item.source === 'generated' && <span className="live-code__country">GENERATED</span>}
               {item.source === 'manual' && <span className="live-code__country">MANUAL</span>}
+              {item.source === 'telegram' && <span className="live-code__country">{item.ocr ? 'TELEGRAM OCR' : 'TELEGRAM'}</span>}
             </div>
             <div className="live-code__tags">
               {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}

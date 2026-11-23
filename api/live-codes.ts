@@ -1,6 +1,7 @@
 import { isAdminKey } from './admin-auth.js'
+import { timingSafeEqual } from 'node:crypto'
 
-type Bookie = 'sportybet'
+type Bookie = 'sportybet' | 'betway'
 
 type LiveCode = {
   id: string
@@ -11,6 +12,7 @@ type LiveCode = {
   channel: string
   countryCode: CountryCode
   source?: 'telegram' | 'generated' | 'manual'
+  ocr?: boolean
   generatedAt?: string
   expiresAt?: string
   legs?: Array<{ event_id?: string; home_team?: string; away_team?: string; market: string; pick: string; odds: number }>
@@ -32,10 +34,14 @@ type CountryCode = 'GHANA'
 
 const DEFAULT_COUNTRY: CountryCode = 'GHANA'
 
-const SOURCE_CONFIG: Array<{ channel: string, country: CountryCode }> = [
-  { channel: 'sportybet_gh', country: 'GHANA' },
-  { channel: 'SportybetOfficialChannel', country: 'GHANA' },
-]
+const configuredChannels = (process.env.TELEGRAM_CHANNELS ?? '')
+  .split(/[,;\s]+/)
+  .map((channel) => channel.trim())
+  .filter(Boolean)
+  .map((channel) => channel.replace(/^https?:\/\/t\.me\/(?:s\/)?/i, '').replace(/^@/, '').replace(/[/?#].*$/, ''))
+const SOURCE_CONFIG: Array<{ channel: string, country: CountryCode }> =
+  (configuredChannels.length ? configuredChannels : ['sportybet_gh', 'SportybetOfficialChannel'])
+    .map((channel) => ({ channel, country: 'GHANA' }))
 const CHANNELS = SOURCE_CONFIG.map((source) => source.channel)
 const CACHE_TTL_MS = 60_000
 const MAX_PER_BOOKIE = 30
@@ -53,6 +59,7 @@ type FeedBody = {
   success: true
   updatedAt: string
   sportybet: LiveCode[]
+  betway: LiveCode[]
   warnings?: string[]
 }
 
@@ -92,7 +99,7 @@ async function readGeneratedCodes() {
     try {
       const parsed = JSON.parse(item) as LiveCode
       const valid = parsed.code &&
-        parsed.bookie === 'sportybet' &&
+        (parsed.bookie === 'sportybet' || parsed.bookie === 'betway') &&
         parsed.countryCode === 'GHANA'
       return valid ? [parsed] : []
     } catch {
@@ -116,7 +123,7 @@ async function readManualCodes() {
       try {
         const parsed = JSON.parse(item) as LiveCode
         return parsed.source === 'manual' &&
-          parsed.bookie === 'sportybet' &&
+          (parsed.bookie === 'sportybet' || parsed.bookie === 'betway') &&
           parsed.countryCode === 'GHANA'
           ? [parsed]
           : []
@@ -126,7 +133,7 @@ async function readManualCodes() {
     })
   return stored.filter((item) =>
     item.source === 'manual' &&
-    item.bookie === 'sportybet' &&
+    (item.bookie === 'sportybet' || item.bookie === 'betway') &&
     item.countryCode === 'GHANA')
 }
 
@@ -168,16 +175,19 @@ async function storeGeneratedCode(body: Record<string, unknown>) {
   const code = typeof body.code === 'string' ? body.code.toUpperCase() : ''
   const countryCode = typeof body.countryCode === 'string' ? body.countryCode.toUpperCase() : 'GHANA'
   const bookie = typeof body.bookie === 'string' ? body.bookie.toLowerCase() : 'sportybet'
-  if (bookie !== 'sportybet' || countryCode !== 'GHANA') {
-    throw new Error('Only SportyBet Ghana (GH) codes can be stored.')
+  if ((bookie !== 'sportybet' && bookie !== 'betway') || countryCode !== 'GHANA') {
+    throw new Error('Only SportyBet Ghana (GH) or Betway Ghana (GH) codes can be stored.')
   }
   const time = typeof body.time === 'string' && Number.isFinite(Date.parse(body.time))
     ? new Date(body.time).toISOString()
     : new Date().toISOString()
   const legs = Array.isArray(body.legs) ? body.legs : []
-  const validLegs = validStoredLegs(legs)
-  if (!/^[A-Z0-9]{6,12}$/.test(code) || validLegs === null) {
-    throw new Error('A valid booking code and 1–100 unique, structured legs are required.')
+  const validLegs = legs.length > 0 ? validStoredLegs(legs) : []
+  if (bookie === 'sportybet' && !/^[A-Z0-9]{6}$/.test(code)) {
+    throw new Error('A valid 6-character SportyBet Ghana booking code is required.')
+  }
+  if (bookie === 'betway' && !/^BW[A-Z0-9]{6}$/.test(code)) {
+    throw new Error('A valid 8-character Betway Ghana booking code starting with BW is required.')
   }
   const source = body.source === 'manual' ? 'manual' : 'generated'
   const expiresAt = source === 'generated'
@@ -186,9 +196,11 @@ async function storeGeneratedCode(body: Record<string, unknown>) {
   const record: LiveCode = {
     id: `generated:${code}:${time}`,
     code,
-    odds: legs.reduce((total, leg) => total * (typeof (leg as Record<string, unknown>)?.odds === 'number' ? (leg as Record<string, number>).odds : 1), 1),
+    odds: typeof body.combinedOdds === 'number' && body.combinedOdds >= 1
+      ? body.combinedOdds
+      : legs.reduce((total, leg) => total * (typeof (leg as Record<string, unknown>)?.odds === 'number' ? (leg as Record<string, number>).odds : 1), legs.length ? 1 : 0),
     time,
-    bookie: 'sportybet',
+    bookie: bookie as Bookie,
     channel: typeof body.channel === 'string' ? body.channel : 'reality-simulator',
     countryCode: 'GHANA',
     source,
@@ -259,8 +271,11 @@ function extractCodes(text: string): Array<{ bookie: Bookie, code: string }> {
     const isJunkCode = (code: string) => /^[^\p{L}\p{N}]+$/u.test(code) || /^(.)\1{5,}$/u.test(code) || code.length > 12
     if (isJunkCode(code)) continue
     const before = text.slice(Math.max(0, index - 40), index)
-    const labeledSportyBet = /sporty\s*bet/i.test(before)
-    if (labeledSportyBet || code.length <= 8) found.set(code, 'sportybet')
+    if (code.startsWith('BW')) {
+      found.set(code, 'betway')
+    } else if (/sporty\s*bet/i.test(before) || code.length === 6) {
+      found.set(code, 'sportybet')
+    }
   }
   return [...found].map(([code, bookie]) => ({ code, bookie }))
 }
@@ -294,7 +309,17 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
   response.setHeader('Cache-Control', request.method === 'POST' ? 'no-store' : 'public, s-maxage=60, stale-while-revalidate=30')
   response.setHeader('X-Content-Type-Options', 'nosniff')
   if (request.method === 'POST') {
-    if (!isAdminKey(headerValue(request.headers?.['x-admin-key']))) {
+    const submittedKey = headerValue(request.headers?.['x-admin-key'])
+    const masterKey = process.env.ADMIN_MASTER_KEY
+    const publishKey = process.env.LIVE_CODES_ADMIN_KEY
+    let authorized = false
+    if (masterKey && isAdminKey(submittedKey)) authorized = true
+    if (!authorized && publishKey) {
+      const actual = Buffer.from(submittedKey)
+      const expected = Buffer.from(publishKey)
+      authorized = actual.length === expected.length && timingSafeEqual(actual, expected)
+    }
+    if (!authorized) {
       return response.status(401).json({ success: false, error: 'A valid admin key is required.' })
     }
     try {
@@ -319,6 +344,11 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
         item.countryCode === 'GHANA' &&
         (item.source !== 'generated' ||
           (!item.expiresAt || Date.parse(item.expiresAt) > now))),
+      betway: cached.body.betway.filter((item) =>
+        item.bookie === 'betway' &&
+        item.countryCode === 'GHANA' &&
+        (item.source !== 'generated' ||
+          (!item.expiresAt || Date.parse(item.expiresAt) > now))),
     }
     return response.status(200).json(filtered)
   }
@@ -334,6 +364,7 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
       success: true as const,
       updatedAt: new Date(now).toISOString(),
       sportybet: [],
+      betway: [],
       warnings,
     })
   }
@@ -357,15 +388,20 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
     manual = manualMemory
   }
   generated = generated.filter((item) =>
-    item.bookie === 'sportybet' && item.countryCode === 'GHANA')
+    (item.bookie === 'sportybet' || item.bookie === 'betway') && item.countryCode === 'GHANA')
   manual = manual.filter((item) =>
     item.source === 'manual' &&
-    item.bookie === 'sportybet' &&
+    (item.bookie === 'sportybet' || item.bookie === 'betway') &&
     item.countryCode === 'GHANA')
   const body = {
     success: true as const,
     updatedAt: new Date(now).toISOString(),
     sportybet: [...generated, ...manual, ...newestFirst.filter((item) => item.bookie === 'sportybet')]
+      .filter((item) => item.bookie === 'sportybet')
+      .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
+      .slice(0, MAX_PER_BOOKIE),
+    betway: [...generated, ...manual, ...newestFirst.filter((item) => item.bookie === 'betway')]
+      .filter((item) => item.bookie === 'betway')
       .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
       .slice(0, MAX_PER_BOOKIE),
     ...(warnings.length > 0 ? { warnings } : {}),

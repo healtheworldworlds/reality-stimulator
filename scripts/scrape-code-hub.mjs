@@ -55,7 +55,7 @@ try {
   }
 
   if (isValidationEnabled(args)) records = await validateDiscoveredCodes(records);
-  mergeDiscoveryOutput(root, records);
+  await mergeDiscoveryOutput(root, records);
   console.log(`Discovered ${records.length} SportyBet Ghana code(s) from Code Hub.`);
   for (const record of records) {
     console.log(JSON.stringify(record));
