@@ -7,6 +7,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 await discoverTelegramChannels();
 const scripts = [
   ['scrape-code-hub.mjs', process.argv.slice(2)],
+  ['scrape-web-codes.mjs', process.argv.slice(2)],
   ['scrape-telegram-ocr.mjs', process.argv.slice(2)],
 ];
 

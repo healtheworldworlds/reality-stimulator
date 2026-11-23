@@ -9,6 +9,7 @@
     "lint": "oxlint src vite.config.ts",
     "scrape:telegram": "node scripts/scrape-telegram-ocr.mjs",
     "scrape:code-hub": "node scripts/scrape-code-hub.mjs",
+    "scrape:web": "node scripts/scrape-web-codes.mjs",
     "scrape:all": "node scripts/scrape-all.mjs",
     "discover:telegram": "node scripts/discover-telegram-channels.mjs",
     "schedule:install": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/install-scheduler.ps1",

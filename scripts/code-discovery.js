@@ -165,6 +165,12 @@ export async function publishNewDiscoveries(root, records, args = process.argv.s
           combinedOdds: record.combinedOdds ?? record.odds ?? null,
           verified: record.verified === true,
           ocr: record.source === 'telegram',
+          sourceDomain: record.sourceDomain || null,
+          channel: record.source === 'code-hub'
+            ? 'sportybet-code-hub'
+            : record.sourceDomain
+              ? `web:${record.sourceDomain}`
+              : record.channel || 'telegram-ocr',
         }),
         signal: AbortSignal.timeout(10000),
       });
