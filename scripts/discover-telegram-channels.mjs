@@ -125,6 +125,34 @@ async function fetchPreview(channel) {
   return response.text();
 }
 
+async function safeGetHtml(page, url) {
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await page.waitForLoadState('networkidle', { timeout: 6000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await page.content();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes('page is navigating and changing the content')) throw error;
+      await page.waitForTimeout(500);
+    }
+  }
+  throw new Error('page content remained unstable after navigation retries');
+}
+
+async function fetchSearchHtml(url) {
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml',
+    },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+}
+
 async function searchWeb(browser) {
   const queries = [
     'site:t.me "SportyBet" "Ghana"',
@@ -141,25 +169,51 @@ async function searchWeb(browser) {
   const page = await browser.newPage();
   try {
     const searchEngines = [
-      (query) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-      (query) => `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
+      { name: 'DuckDuckGo', buildUrl: (query) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}` },
+      { name: 'Bing', buildUrl: (query) => `https://www.bing.com/search?q=${encodeURIComponent(query)}` },
     ];
     for (const query of queries) {
-      for (const buildUrl of searchEngines) {
-        await page.goto(buildUrl(query), { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-        await page.waitForTimeout(350);
-        const html = await page.content();
-        for (const channel of extractChannelCandidates(html)) found.add(channel);
+      for (const engine of searchEngines) {
+        const browserUrl = engine.buildUrl(query);
+        try {
+          const html = await safeGetHtml(page, browserUrl);
+          for (const channel of extractChannelCandidates(html)) found.add(channel);
+        } catch (error) {
+          console.warn(`${engine.name} browser query failed (${query}): ${error instanceof Error ? error.message : String(error)}`);
+        }
+        try {
+          const html = await fetchSearchHtml(browserUrl);
+          for (const channel of extractChannelCandidates(html)) found.add(channel);
+        } catch (error) {
+          console.warn(`${engine.name} HTTP query failed (${query}): ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
     }
   } finally {
     await page.close();
   }
 
+  const directUrls = [
+    ...queries.map((query) => `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`),
+    ...queries.map((query) => `https://www.bing.com/search?q=${encodeURIComponent(query)}`),
+    ...[
+      'SportyBet Ghana',
+      'Betway Ghana',
+      'booking code SportyBet',
+      'booking code Betway',
+    ].map((query) => `https://tgstat.com/en/search?q=${encodeURIComponent(query)}`),
+  ];
+  const directResults = await Promise.allSettled(directUrls.map(fetchSearchHtml));
+  for (const result of directResults) {
+    if (result.status === 'fulfilled') {
+      for (const channel of extractChannelCandidates(result.value)) found.add(channel);
+    }
+  }
+
   const directoryUrls = [
     'https://t.me/s/SportybetOfficialChannel',
-    'https://tgstat.com/search?q=SportyBet%20Ghana',
-    'https://tgstat.com/search?q=Betway%20Ghana',
+    'https://tgstat.com/en/search?q=SportyBet%20Ghana',
+    'https://tgstat.com/en/search?q=Betway%20Ghana',
     'https://telemetr.io/en/channels/search?query=SportyBet%20Ghana',
     'https://telemetr.io/en/channels/search?query=Betway%20Ghana',
   ];
@@ -168,7 +222,7 @@ async function searchWeb(browser) {
       const html = url.startsWith('https://t.me/s/')
         ? await fetchPreview(url.split('/').at(-1))
         : await (await fetch(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; RealitySimulator/1.0)' },
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' },
           signal: AbortSignal.timeout(30000),
         })).text();
       if (html) for (const channel of extractChannelCandidates(html)) found.add(channel);
@@ -187,16 +241,22 @@ export async function discoverTelegramChannels() {
 
   try {
     browser = await chromium.launch({ headless: true });
-    for (const channel of await searchWeb(browser)) {
-      if (!queued.has(channel) && queue.length < 250) {
-        queued.add(channel);
-        queue.push({ channel, depth: 0 });
-      }
-    }
   } catch (error) {
-    console.warn(`Web discovery unavailable: ${error instanceof Error ? error.message : String(error)}`);
-  } finally {
-    await browser?.close();
+    console.warn(`Headless browser unavailable; continuing with HTTP discovery: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (browser) {
+    try {
+      for (const channel of await searchWeb(browser)) {
+        if (!queued.has(channel) && queue.length < 250) {
+          queued.add(channel);
+          queue.push({ channel, depth: 0 });
+        }
+      }
+    } catch (error) {
+      console.warn(`Search discovery settled with partial results: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      await browser.close();
+    }
   }
 
   let index = 0;
