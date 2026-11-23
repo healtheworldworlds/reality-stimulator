@@ -60,6 +60,7 @@ export function extractTaggedCodes(text, allowForValidation = false) {
 export function deduplicateDiscoveries(records) {
   const seen = new Set();
   return records.filter((record) => {
+    if (!record || typeof record !== 'object') return false;
     const key = `${record.bookmaker}:${record.code}`;
     if (seen.has(key)) return false;
     seen.add(key);

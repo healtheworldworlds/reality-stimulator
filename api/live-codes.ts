@@ -255,7 +255,9 @@ function isValidCode(value: string) {
 }
 
 function isValidExplicitCode(value: string) {
-  return /^[A-Z0-9]{6,8}$/i.test(value) && !STOP_WORDS.has(value.toUpperCase())
+  const code = value.toUpperCase()
+  if (code.startsWith('BW')) return isValidBookieCode('betway', code)
+  return isValidBookieCode('sportybet', code) && !STOP_WORDS.has(code)
 }
 
 function isValidBookieCode(bookie: Bookie, code: string) {
