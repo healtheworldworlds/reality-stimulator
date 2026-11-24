@@ -1,0 +1,33 @@
+name: Scrape Live Codes
+
+on:
+  schedule:
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+jobs:
+  scrape-live-codes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Project Dependencies
+        run: npm ci
+
+      - name: Install Playwright & System Dependencies
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Live Code Scrapers
+        env:
+          LIVE_CODES_ENDPOINT: ${{ secrets.LIVE_CODES_ENDPOINT || 'https://reality-stimulator.vercel.app/api/live-codes' }}
+          LIVE_CODES_ADMIN_KEY: ${{ secrets.LIVE_CODES_ADMIN_KEY }}
+        run: npm run scrape:all
