@@ -8,9 +8,10 @@ const MAX_SEEN_CODES = 2000;
 const BOOKMAKER_BRANDS = new Set([
   'BET365', 'BETGR8', 'BET9JA', '1XBET', 'SPORTY', 'SPORTYBET',
   'BWIN', 'MELBET', 'MSPORT', 'PARIPESA', 'BETWAY', 'BETPESA',
-  'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN',
+  'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN', 'SKY247',
 ]);
-const BOOKMAKER_BRAND_PREFIXES = ['1XBET', 'BET365', 'BETGR8', 'BET9JA', 'BETWAY', 'BETPESA', 'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN'];
+const BOOKMAKER_BRAND_PREFIXES = ['1XBET', 'BET365', 'BETGR8', 'BET9JA', 'BETWAY', 'BETPESA', 'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN', 'SKY247'];
+const NOISE_CODE_TOKENS = new Set(['A408LN', 'C8282S']);
 
 function loadLocalEnv(root) {
   const envFile = path.join(root, '.env');
@@ -34,6 +35,7 @@ export function isValidSportyBetCode(code) {
     /\d/.test(value) &&
     !BOOKMAKER_BRANDS.has(value) &&
     !BOOKMAKER_BRAND_PREFIXES.some((brand) => value.startsWith(brand)) &&
+    !NOISE_CODE_TOKENS.has(value) &&
     !/(.)\1{5}/.test(value) &&
     !/^(?:012345|123456|654321|543210)$/.test(value);
 }

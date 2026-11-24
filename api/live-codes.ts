@@ -54,9 +54,10 @@ const STOP_WORDS = new Set([
 const BOOKMAKER_BRANDS = new Set([
   'BET365', 'BETGR8', 'BET9JA', '1XBET', 'SPORTY', 'SPORTYBET',
   'BWIN', 'MELBET', 'MSPORT', 'PARIPESA', 'BETWAY', 'BETPESA',
-  'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN',
+  'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN', 'SKY247',
 ])
-const BOOKMAKER_BRAND_PREFIXES = ['1XBET', 'BET365', 'BETGR8', 'BET9JA', 'BETWAY', 'BETPESA', 'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN']
+const BOOKMAKER_BRAND_PREFIXES = ['1XBET', 'BET365', 'BETGR8', 'BET9JA', 'BETWAY', 'BETPESA', 'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN', 'SKY247']
+const NOISE_CODE_TOKENS = new Set(['A408LN', 'C8282S'])
 const MAX_CODE_AGE_MS = 24 * 60 * 60 * 1000
 const GENERATED_CODES_KEY = 'reality-simulator:generated-live-codes'
 const MANUAL_CODES_KEY = 'reality-simulator:manual-live-codes'
@@ -134,7 +135,8 @@ async function readGeneratedCodes() {
       const parsed = JSON.parse(item) as LiveCode
       const valid = parsed.code &&
         parsed.bookie === 'sportybet' &&
-        parsed.countryCode === 'GHANA'
+        parsed.countryCode === 'GHANA' &&
+        isValidBookieCode(parsed.bookie, parsed.code)
       return valid ? [parsed] : []
     } catch {
       return []
@@ -158,7 +160,8 @@ async function readManualCodes() {
         const parsed = JSON.parse(item) as LiveCode
         return parsed.source === 'manual' &&
           parsed.bookie === 'sportybet' &&
-          parsed.countryCode === 'GHANA'
+          parsed.countryCode === 'GHANA' &&
+          isValidBookieCode(parsed.bookie, parsed.code)
           ? [parsed]
           : []
       } catch {
@@ -277,6 +280,17 @@ function findOdds(text: string) {
   return Number.isFinite(odds) && odds >= 1.01 ? odds : null
 }
 
+function hasRealMetadata(item: LiveCode) {
+  return (typeof item.odds === 'number' && item.odds > 0) ||
+    (item.legs?.length ?? 0) > 0 ||
+    (item.source === 'telegram' && Number.isFinite(Date.parse(item.time)))
+}
+
+function codeTimestamp(item: LiveCode) {
+  const timestamp = Date.parse(item.time)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
 function isValidCode(value: string) {
   return isValidBookieCode('sportybet', value)
 }
@@ -293,6 +307,7 @@ function isValidBookieCode(_bookie: Bookie, code: string) {
     !STOP_WORDS.has(normalized) &&
     !BOOKMAKER_BRANDS.has(normalized) &&
     !BOOKMAKER_BRAND_PREFIXES.some((brand) => normalized.startsWith(brand)) &&
+    !NOISE_CODE_TOKENS.has(normalized) &&
     !/^(.)\1{5}$/.test(normalized) &&
     !/^(?:012345|123456|654321|543210)$/.test(normalized)
 }
@@ -434,24 +449,20 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
     item.bookie === 'sportybet' &&
     item.countryCode === 'GHANA' &&
     isValidBookieCode(item.bookie, item.code))
-  const candidates = [...generated, ...manual, ...newestFirst]
-    .filter((item) => item.bookie === 'sportybet' &&
-      item.countryCode === 'GHANA' &&
-      isValidBookieCode(item.bookie, item.code))
-    .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
-    .sort((a, b) => {
-      const aHasMetadata = Number(
-        (typeof a.odds === 'number' && a.odds > 0) ||
-        (a.legs?.length ?? 0) > 0 ||
-        (a.source === 'telegram' && Number.isFinite(Date.parse(a.time))),
-      )
-      const bHasMetadata = Number(
-        (typeof b.odds === 'number' && b.odds > 0) ||
-        (b.legs?.length ?? 0) > 0 ||
-        (b.source === 'telegram' && Number.isFinite(Date.parse(b.time))),
-      )
-      return bHasMetadata - aHasMetadata || Date.parse(b.time) - Date.parse(a.time)
-    })
+  const candidatesByCode = new Map<string, LiveCode>()
+  for (const item of [...generated, ...manual, ...newestFirst]) {
+    if (item.bookie !== 'sportybet' ||
+      item.countryCode !== 'GHANA' ||
+      !isValidBookieCode(item.bookie, item.code)) continue
+    const existing = candidatesByCode.get(item.code)
+    if (!existing ||
+      Number(hasRealMetadata(item)) > Number(hasRealMetadata(existing)) ||
+      (hasRealMetadata(item) === hasRealMetadata(existing) && codeTimestamp(item) > codeTimestamp(existing))) {
+      candidatesByCode.set(item.code, item)
+    }
+  }
+  const candidates = [...candidatesByCode.values()]
+    .sort((a, b) => codeTimestamp(b) - codeTimestamp(a) || Number(hasRealMetadata(b)) - Number(hasRealMetadata(a)))
   let seenCodes: Set<string>
   try {
     seenCodes = await readSeenSportybetCodes()
@@ -459,8 +470,9 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
     const message = error instanceof Error ? error.message : 'Live code history is unavailable.'
     return response.status(503).json({ success: false, error: message })
   }
-  const fresh = candidates.filter((item) => !seenCodes.has(item.code.toUpperCase()))
-  const active = (fresh.length ? fresh : candidates).slice(0, MAX_PER_BOOKIE)
+  const unseen = candidates.filter((item) => !seenCodes.has(item.code.toUpperCase()))
+  const previouslySeen = candidates.filter((item) => seenCodes.has(item.code.toUpperCase()))
+  const active = [...unseen, ...previouslySeen].slice(0, MAX_PER_BOOKIE)
   try {
     await rememberSeenSportybetCodes(active.map((item) => item.code))
   } catch (error) {

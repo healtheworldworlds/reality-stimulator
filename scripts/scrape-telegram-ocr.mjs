@@ -6,6 +6,7 @@ import sharp from 'sharp';
 import {
   extractTaggedCodes,
   deduplicateDiscoveries,
+  isValidSportyBetCode,
   mergeDiscoveryOutput,
   isValidationEnabled,
   validateDiscoveredCodes,
@@ -217,7 +218,12 @@ channels = [...new Set(channels)];
 
 {
   const seen = readSeenState();
-  const telegramExisting = readLines(CODES_FILE);
+  const rawTelegramExisting = readLines(CODES_FILE);
+  const telegramExisting = [...new Set(rawTelegramExisting
+    .map((code) => code.toUpperCase())
+    .filter(isValidSportyBetCode))];
+  const telegramHistoryNeedsRewrite = telegramExisting.length !== rawTelegramExisting.length ||
+    telegramExisting.some((code, index) => code !== rawTelegramExisting[index]);
   const telegramSet = new Set(telegramExisting);
   const newlyFound = [];
   const newlyFoundSet = new Set();
@@ -318,10 +324,14 @@ channels = [...new Set(channels)];
     if (worker) await worker.terminate();
   }
 
-  if (newlyFound.length) {
-    const combined = [...telegramExisting, ...newlyFound.map((record) => record.code)];
+  if (newlyFound.length || telegramHistoryNeedsRewrite) {
+    const combined = [...new Set([...newlyFound.map((record) => record.code), ...telegramExisting])];
     writeLines(CODES_FILE, combined);
-    console.log(`Added ${newlyFound.length} new code(s) to ${path.basename(CODES_FILE)}.`);
+    if (newlyFound.length) {
+      console.log(`Added ${newlyFound.length} new code(s) to ${path.basename(CODES_FILE)}.`);
+    } else {
+      console.log(`Removed invalid or duplicate entries from ${path.basename(CODES_FILE)}.`);
+    }
   } else {
     console.log(`No brand-new codes found; ${path.basename(CODES_FILE)} remains deduplicated.`);
   }
