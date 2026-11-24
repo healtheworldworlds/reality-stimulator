@@ -1073,8 +1073,7 @@ h2 {
   font-size: 10px;
 }
 
-.live-codes__empty,
-.live-codes__note {
+.live-codes__empty {
   margin: 10px 0 0;
   color: var(--muted);
   font-size: 10px;

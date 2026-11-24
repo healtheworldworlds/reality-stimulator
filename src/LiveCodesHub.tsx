@@ -131,7 +131,6 @@ export function LiveCodesHub() {
               {item.legs && <span className="live-code__odds">{item.legs.length} legs</span>}
               {item.legs && <span className="live-code__channel">{[...new Set(item.legs.map((leg) => leg.market))].join(', ')}</span>}
               <span className="live-code__time">{relativeTime(item.time, now)}</span>
-              <span className="live-code__channel">@{item.channel}</span>
             </div>
             <div className="live-code__actions">
               <button className="quiet-button" type="button" onClick={() => void copyCode(item)}>
@@ -141,7 +140,6 @@ export function LiveCodesHub() {
           </li>
         ))}
       </ul>
-      <p className="live-codes__note">Codes are scraped from public Telegram previews. They are unverified and may be expired. Never pay for codes.</p>
     </section>
   )
 }
