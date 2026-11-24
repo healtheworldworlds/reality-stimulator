@@ -40,13 +40,13 @@ function readExisting() {
     const values = Array.isArray(parsed) ? parsed : parsed?.channels;
     const records = Array.isArray(values) ? values.map((value) => {
       if (typeof value === 'string') {
-        return { slug: normalizeChannel(value), bookmaker: 'both', lastChecked: null, codesFound: 0 };
+        return { slug: normalizeChannel(value), bookmaker: 'sportybet', lastChecked: null, codesFound: 0 };
       }
       const slug = normalizeChannel(value?.slug);
       if (!slug) return null;
       return {
         slug,
-        bookmaker: ['sportybet', 'betway', 'both'].includes(value.bookmaker) ? value.bookmaker : 'both',
+        bookmaker: 'sportybet',
         lastChecked: typeof value.lastChecked === 'string' ? value.lastChecked : null,
         codesFound: Number.isInteger(value.codesFound) ? value.codesFound : 0,
       };
@@ -61,7 +61,7 @@ function readExisting() {
 }
 
 function writeExisting(channels) {
-  const ordered = [...new Map(channels.map((channel) => [channel.slug, channel])).values()]
+  const ordered = [...new Map(channels.map((channel) => [channel.slug, { ...channel, bookmaker: 'sportybet' }])).values()]
     .filter((channel) => channel.slug === BOOTSTRAP || channel.codesFound > 0);
   const boot = ordered.find((channel) => channel.slug === BOOTSTRAP);
   const rest = ordered.filter((channel) => channel.slug !== BOOTSTRAP);
@@ -108,20 +108,16 @@ function extractChannelCandidates(html) {
 
 function extractBookingCodes(html) {
   const text = stripHtml(html).toUpperCase();
-  const sportybet = [...text.matchAll(/\b[A-Z0-9]{6}\b/g)]
+  return [...new Set([...text.matchAll(/\b[A-Z0-9]{6}\b/g)]
     .map((match) => match[0])
-    .filter((code) => /[0-9]/.test(code));
-  const betway = [...text.matchAll(/\bBW[A-Z0-9]{6}\b/g)]
-    .map((match) => match[0])
-    .filter((code) => /[0-9]/.test(code.slice(2)));
-  return [...new Set([...sportybet, ...betway])];
+    .filter((code) => /[0-9]/.test(code)))];
 }
 
 function previewHasBettingKeywords(html) {
   const titleMatch = html.match(/<meta[^>]+(?:property|name)=["'](?:og:title|description)["'][^>]+content=["']([^"']*)["']/gi);
   const descriptionMatch = html.match(/<div[^>]+class=["'][^"']*tgme_page_description[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
   const titleDescription = `${titleMatch?.join(' ') ?? ''} ${descriptionMatch ? stripHtml(descriptionMatch[1]) : ''}`.toUpperCase();
-  return /\b(SPORTYBET|BETWAY|BOOKING CODE|GHANA|BETTING)\b/.test(titleDescription);
+  return /\b(SPORTYBET|BOOKING CODE|GHANA|BETTING)\b/.test(titleDescription);
 }
 
 async function fetchPreview(channel) {
@@ -167,11 +163,8 @@ async function fetchSearchHtml(url) {
 async function searchWeb(browser) {
   const queries = [
     'site:t.me sportybet ghana',
-    'site:t.me betway ghana',
     'site:t.me booking code sportybet',
-    'site:t.me booking code betway',
     '"t.me/" "sportybet" booking code',
-    '"t.me/" "betway" ghana code',
   ];
   const found = new Set();
   const page = await browser.newPage();
@@ -203,11 +196,8 @@ async function searchWeb(browser) {
   const directUrls = [
     ...queries.map((query) => `https://www.bing.com/search?q=${encodeURIComponent(query)}`),
     'https://tgstat.com/en/search?q=sportybet',
-    'https://tgstat.com/en/search?q=betway',
     'https://telemetr.io/en/channels?q=sportybet',
-    'https://telemetr.io/en/channels?q=betway',
     'https://tlgrm.eu/channels?q=sportybet',
-    'https://tlgrm.eu/channels?q=betway',
   ];
   const directResults = await Promise.allSettled(directUrls.map(fetchSearchHtml));
   for (const result of directResults) {
@@ -219,11 +209,8 @@ async function searchWeb(browser) {
   const directoryUrls = [
     'https://t.me/s/SportybetOfficialChannel',
     'https://tgstat.com/en/search?q=sportybet',
-    'https://tgstat.com/en/search?q=betway',
     'https://telemetr.io/en/channels?q=sportybet',
-    'https://telemetr.io/en/channels?q=betway',
     'https://tlgrm.eu/channels?q=sportybet',
-    'https://tlgrm.eu/channels?q=betway',
   ];
   for (const url of directoryUrls) {
     try {
@@ -281,13 +268,10 @@ export async function discoverTelegramChannels() {
       const html = result.value;
       const codes = extractBookingCodes(html);
       const keywordMatch = previewHasBettingKeywords(html);
-      if ((codes.length && (keywordMatch || /sportybet|betway|ghana|booking/i.test(stripHtml(html)))) || keywordMatch) {
-        const text = stripHtml(html).toUpperCase();
-        const hasSportybet = [...text.matchAll(/\b[A-Z0-9]{6}\b/g)].some((match) => /[0-9]/.test(match[0]));
-        const hasBetway = [...text.matchAll(/\bBW[A-Z0-9]{6}\b/g)].some((match) => /[0-9]/.test(match[0].slice(2)));
+      if ((codes.length && (keywordMatch || /sportybet|ghana|booking/i.test(stripHtml(html)))) || keywordMatch) {
         verified.set(item.channel, {
           slug: item.channel,
-          bookmaker: hasSportybet && hasBetway ? 'both' : hasBetway ? 'betway' : 'sportybet',
+          bookmaker: 'sportybet',
           lastChecked: new Date().toISOString(),
           codesFound: codes.length,
         });

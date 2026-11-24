@@ -342,13 +342,13 @@ channels = [...new Set(channels)];
   const existingRecords = Array.isArray(existingConfig) ? existingConfig : [];
   const bySlug = new Map(existingRecords
     .map((entry) => typeof entry === 'string'
-      ? { slug: entry, bookmaker: 'both', lastChecked: null, codesFound: 0 }
-      : entry)
+      ? { slug: entry, bookmaker: 'sportybet', lastChecked: null, codesFound: 0 }
+      : { ...entry, bookmaker: 'sportybet' })
     .filter((entry) => entry?.slug)
     .map((entry) => [entry.slug, entry]));
   for (const slug of spiderCandidates) {
-    const prior = bySlug.get(slug) ?? { slug, bookmaker: 'both', lastChecked: null, codesFound: 0 };
-    bySlug.set(slug, { ...prior, lastChecked: now });
+    const prior = bySlug.get(slug) ?? { slug, lastChecked: null, codesFound: 0 };
+    bySlug.set(slug, { ...prior, bookmaker: 'sportybet', lastChecked: now });
   }
   fs.writeFileSync(CONFIG_FILE, `${JSON.stringify([...bySlug.values()], null, 2)}\n`, 'utf8');
   console.log(`Scrape summary: ${activeChannels} active channel(s) scraped; ${spiderCandidates.size} candidate channel(s) queued; ${newlyFound.length} new code(s) found.`);

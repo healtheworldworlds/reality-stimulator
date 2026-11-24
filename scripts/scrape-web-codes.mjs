@@ -11,7 +11,7 @@ import {
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHANNELS_FILE = path.join(ROOT, 'telegram-channels.json');
 const STOP_WORDS = new Set([
-  'FAILED', 'RELOAD', 'BETWAY', 'SPORTS', 'GHANA', 'LOGOUT', 'SPORTY', 'SPORTYBET',
+  'FAILED', 'RELOAD', 'SPORTS', 'GHANA', 'LOGOUT', 'SPORTY', 'SPORTYBET',
   'BOOKING', 'CODE', 'CODES', 'TODAY', 'TICKET', 'VOUCHER', 'WINNER', 'SUBMIT',
   'CANCEL', 'MARKET', 'EVENTS',
 ]);
@@ -27,11 +27,6 @@ function domainLabel(url) {
 function extractCodes(text, sourceDomain) {
   const clean = String(text ?? '').replace(/https?:\/\/\S+/gi, ' ').toUpperCase();
   const records = [];
-  for (const match of clean.matchAll(/\bBW[A-Z0-9]{6}\b/g)) {
-    if (!/[0-9]/.test(match[0].slice(2))) continue;
-    const record = normalizeCodeDiscovery(match[0], 'betway', 'web', { sourceDomain });
-    if (record) records.push(record);
-  }
   for (const match of clean.matchAll(/\b[A-Z0-9]{6}\b/g)) {
     const code = match[0];
     if (!/[0-9]/.test(code) || STOP_WORDS.has(code)) continue;
@@ -68,12 +63,12 @@ function saveChannelCandidates(slugs) {
   const now = new Date().toISOString();
   const bySlug = new Map();
   for (const entry of readChannelCache()) {
-    if (typeof entry === 'string') bySlug.set(entry, { slug: entry, bookmaker: 'both', lastChecked: null, codesFound: 0 });
-    else if (entry?.slug) bySlug.set(entry.slug, entry);
+    if (typeof entry === 'string') bySlug.set(entry, { slug: entry, bookmaker: 'sportybet', lastChecked: null, codesFound: 0 });
+    else if (entry?.slug) bySlug.set(entry.slug, { ...entry, bookmaker: 'sportybet' });
   }
   for (const slug of slugs) {
-    const prior = bySlug.get(slug) || { slug, bookmaker: 'both', lastChecked: null, codesFound: 0 };
-    bySlug.set(slug, { ...prior, lastChecked: now });
+    const prior = bySlug.get(slug) || { slug, lastChecked: null, codesFound: 0 };
+    bySlug.set(slug, { ...prior, bookmaker: 'sportybet', lastChecked: now });
   }
   fs.writeFileSync(CHANNELS_FILE, `${JSON.stringify([...bySlug.values()], null, 2)}\n`, 'utf8');
 }
@@ -124,7 +119,6 @@ try {
 
   const searches = [
     'https://search.yahoo.com/search?p=sportybet+booking+code+today+ghana',
-    'https://search.yahoo.com/search?p=betway+ghana+booking+code+today',
   ];
   for (const searchUrl of searches) {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });

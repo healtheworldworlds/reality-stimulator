@@ -943,27 +943,6 @@ h2 {
   gap: 8px;
 }
 
-.live-codes__tabs {
-  display: flex;
-  border: 1px solid var(--border-strong);
-  border-radius: 5px;
-  overflow: hidden;
-}
-
-.live-codes__tab {
-  padding: 7px 11px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: 10px;
-  cursor: pointer;
-}
-
-.live-codes__tab.is-active {
-  background: var(--accent);
-  color: #fff;
-}
-
 .live-codes__auto {
   display: flex;
   align-items: center;

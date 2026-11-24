@@ -3,6 +3,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { chromium } from 'playwright';
 
+const SEEN_CODES_FILE = 'seen_sportybet_codes.json';
+const MAX_SEEN_CODES = 2000;
+
 function loadLocalEnv(root) {
   const envFile = path.join(root, '.env');
   if (!fs.existsSync(envFile)) return;
@@ -20,14 +23,7 @@ function loadLocalEnv(root) {
 
 export function normalizeCodeDiscovery(code, bookmaker, source = 'telegram', extra = {}) {
   const value = String(code ?? '').trim().toUpperCase();
-  if (bookmaker === 'sportybet') {
-    if (!/^[A-Z0-9]{6}$/.test(value)) return null;
-    if (!/\d/.test(value) && extra.verified !== true && extra.allowForValidation !== true) return null;
-  }
-  if (bookmaker === 'betway') {
-    if (!/^BW[A-Z0-9]{6}$/.test(value) || !/[0-9]/.test(value.slice(2))) return null;
-  }
-  if (!['sportybet', 'betway'].includes(bookmaker)) return null;
+  if (bookmaker !== 'sportybet' || !/^[A-Z0-9]{6}$/.test(value) || !/\d/.test(value)) return null;
   return {
     code: value,
     bookmaker,
@@ -39,13 +35,8 @@ export function normalizeCodeDiscovery(code, bookmaker, source = 'telegram', ext
 export function extractTaggedCodes(text, allowForValidation = false) {
   const clean = String(text ?? '').replace(/https?:\/\/\S+/gi, ' ').toUpperCase();
   const found = [];
-  for (const match of clean.matchAll(/\bBW[A-Z0-9]{6}\b/g)) {
-    if (/[0-9]/.test(match[0].slice(2))) {
-      found.push(normalizeCodeDiscovery(match[0], 'betway'));
-    }
-  }
   const common = new Set([
-    'SPORTY', 'DOUBLE', 'CHANCE', 'BETWAY', 'SINGLE', 'TICKET', 'WINNER', 'ONLINE',
+    'SPORTY', 'DOUBLE', 'CHANCE', 'SINGLE', 'TICKET', 'WINNER', 'ONLINE',
     'TODAY', 'RESULT', 'MATCHES', 'FOOTBALL', 'ODDS', 'READY', 'SURE', 'BEST',
     'WINNING', 'PREDICT', 'VOUCHER', 'BOOKING', 'CODE', 'BETS',
   ]);
@@ -72,40 +63,55 @@ export async function mergeDiscoveryOutput(root, records) {
   loadLocalEnv(root);
   const generatedFile = path.join(root, 'generated_codes.txt');
   const manifestFile = path.join(root, 'generated_slips.jsonl');
+  const seenCodesFile = path.join(root, SEEN_CODES_FILE);
   const existingCodes = fs.existsSync(generatedFile)
     ? fs.readFileSync(generatedFile, 'utf8').split(/\r?\n/).map((line) => line.trim().toUpperCase()).filter((code) =>
-      /^BW[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code.slice(2))
-      || /^[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code))
+      /^[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code))
     : [];
+  const incomingRecords = deduplicateDiscoveries(records)
+    .filter((record) => record?.bookmaker === 'sportybet')
+    .sort((a, b) => Date.parse(b.timestamp ?? b.time ?? '') - Date.parse(a.timestamp ?? a.time ?? ''));
+  const existingManifest = fs.existsSync(manifestFile)
+    ? fs.readFileSync(manifestFile, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter((entry) => entry?.bookie === 'sportybet:gh' &&
+      typeof entry.code === 'string' &&
+      /^[A-Z0-9]{6}$/.test(entry.code.toUpperCase()) &&
+      /[0-9]/.test(entry.code))
+    : [];
+  let localSeen = [];
+  if (fs.existsSync(seenCodesFile)) {
+    try {
+      const state = JSON.parse(fs.readFileSync(seenCodesFile, 'utf8'));
+      localSeen = Array.isArray(state.codes)
+        ? state.codes.map((entry) => typeof entry === 'string' ? entry : entry?.code)
+          .filter((code) => typeof code === 'string' && /^[A-Z0-9]{6}$/.test(code.toUpperCase()) && /\d/.test(code))
+          .map((code) => code.toUpperCase())
+        : [];
+    } catch (error) {
+      console.warn(`Could not read ${SEEN_CODES_FILE}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const seenSet = new Set([...localSeen, ...existingCodes, ...existingManifest.map((entry) => entry.code.toUpperCase())]);
+  const newRecords = incomingRecords.filter((record) => !seenSet.has(record.code.toUpperCase()));
+  const newCodeSet = new Set(newRecords.map((record) => record.code.toUpperCase()));
+  const prioritizedIncoming = newRecords.length
+    ? [...newRecords, ...incomingRecords.filter((record) => !newCodeSet.has(record.code.toUpperCase()))]
+    : incomingRecords;
   const allRecords = deduplicateDiscoveries([
-    ...existingCodes.map((code) => normalizeCodeDiscovery(
-      code,
-      /^BW[A-Z0-9]{6}$/.test(code) ? 'betway' : 'sportybet',
-      'existing',
-    )),
-    ...records,
+    ...prioritizedIncoming,
+    ...existingCodes.map((code) => normalizeCodeDiscovery(code, 'sportybet', 'existing')),
   ].filter(Boolean));
 
   fs.writeFileSync(generatedFile, allRecords.length
     ? `${allRecords.map((record) => record.code).join('\n')}\n`
     : '', 'utf8');
 
-  const existingManifest = fs.existsSync(manifestFile)
-    ? fs.readFileSync(manifestFile, 'utf8').split(/\r?\n/).filter(Boolean).map((line) => {
-      try { return JSON.parse(line); } catch { return null; }
-    }).filter((entry) => {
-      if (!entry || typeof entry.code !== 'string') return false;
-      const code = entry.code.toUpperCase();
-      if (entry.bookie === 'betway:gh') return /^BW[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code.slice(2));
-      if (entry.bookie === 'sportybet:gh') return /^[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code);
-      return false;
-    })
-    : [];
   const manifestKeys = new Set(existingManifest.map((entry) => `${entry.bookie}:${entry.code}`));
   const timestamp = new Date().toISOString();
   for (const record of allRecords) {
     if (record.source === 'existing') continue;
-    const bookie = record.bookmaker === 'betway' ? 'betway:gh' : 'sportybet:gh';
+    const bookie = 'sportybet:gh';
     const key = `${bookie}:${record.code}`;
     if (manifestKeys.has(key)) continue;
     const identity = `${record.code}:${record.source}:${record.timestamp ?? timestamp}`;
@@ -128,7 +134,16 @@ export async function mergeDiscoveryOutput(root, records) {
   fs.writeFileSync(manifestFile, existingManifest.length
     ? `${existingManifest.map((entry) => JSON.stringify(entry)).join('\n')}\n`
     : '', 'utf8');
-  await publishNewDiscoveries(root, records);
+  await publishNewDiscoveries(root, newRecords);
+  const currentCodes = incomingRecords
+    .map((record) => record.code.toUpperCase());
+  const orderedSeenCodes = [...new Set([
+    ...currentCodes,
+    ...localSeen,
+    ...existingCodes,
+    ...existingManifest.map((entry) => entry.code.toUpperCase()),
+  ])].slice(0, MAX_SEEN_CODES);
+  fs.writeFileSync(seenCodesFile, `${JSON.stringify({ codes: orderedSeenCodes }, null, 2)}\n`, 'utf8');
   return allRecords;
 }
 
@@ -143,7 +158,8 @@ export async function publishNewDiscoveries(root, records, args = process.argv.s
   if (!endpoint || !adminKey) return [];
 
   const published = [];
-  for (const record of deduplicateDiscoveries(records).filter((item) => item.source !== 'existing')) {
+  for (const record of deduplicateDiscoveries(records)
+    .filter((item) => item.bookmaker === 'sportybet' && item.source !== 'existing')) {
     const legs = Array.isArray(record.legs) ? record.legs : [];
     try {
       const response = await fetch(endpoint, {
@@ -155,7 +171,7 @@ export async function publishNewDiscoveries(root, records, args = process.argv.s
         },
         body: JSON.stringify({
           code: record.code,
-          bookie: record.bookmaker,
+          bookie: 'sportybet',
           countryCode: 'GHANA',
           channel: record.source === 'code-hub' ? 'sportybet-code-hub' : record.channel || 'telegram-ocr',
           source: record.source === 'manual' ? 'manual' : 'generated',
@@ -197,9 +213,8 @@ export async function validateDiscoveredCodes(records) {
   const verified = [];
   try {
     for (const record of deduplicateDiscoveries(records)) {
-      const result = record.bookmaker === 'sportybet'
-        ? await validateSportyBet(browser, record.code)
-        : await validateBetway(browser, record.code);
+      if (record.bookmaker !== 'sportybet') continue;
+      const result = await validateSportyBet(browser, record.code);
       if (result.valid) verified.push({ ...record, verified: true, ...result });
       else console.warn(`Discarded invalid/expired ${record.bookmaker} code ${record.code}: ${result.reason}`);
     }
@@ -264,20 +279,6 @@ async function validateSportyBet(browser, code) {
   try {
     await page.goto('https://www.sportybet.com/gh/', { waitUntil: 'domcontentloaded', timeout: 60000 });
     const fillResult = await fillAndLoad(page, code, ['booking', 'bet code', 'code']);
-    if (fillResult) return fillResult;
-    return await readValidationResult(page);
-  } catch (error) {
-    return { valid: false, reason: error.message };
-  } finally {
-    await page.close();
-  }
-}
-
-async function validateBetway(browser, code) {
-  const page = await browser.newPage();
-  try {
-    await page.goto('https://betway.com.gh/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-    const fillResult = await fillAndLoad(page, code, ['booking', 'bet code', 'betway code', 'code']);
     if (fillResult) return fillResult;
     return await readValidationResult(page);
   } catch (error) {

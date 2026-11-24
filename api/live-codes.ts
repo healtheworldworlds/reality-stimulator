@@ -1,7 +1,7 @@
 import { isAdminKey } from './admin-auth.js'
 import { timingSafeEqual } from 'node:crypto'
 
-type Bookie = 'sportybet' | 'betway'
+type Bookie = 'sportybet'
 
 type LiveCode = {
   id: string
@@ -46,26 +46,28 @@ const CHANNELS = SOURCE_CONFIG.map((source) => source.channel)
 const CACHE_TTL_MS = 60_000
 const MAX_PER_BOOKIE = 30
 const STOP_WORDS = new Set([
-  'BETWAY', 'BOOKING', 'SPORTY', 'SPORTYBET', 'CODE', 'CODES',
+  'BOOKING', 'SPORTY', 'SPORTYBET', 'CODE', 'CODES',
   'FLORIDA', 'KNICKS', 'LEAGUE', 'LOSERS', 'ASTANA',
   'TODAY', 'FREE', 'TICKET', 'VOUCHER', 'WINNER', 'MOBILE', 'TOMORROW', 'WINNERS',
 ])
 const MAX_CODE_AGE_MS = 24 * 60 * 60 * 1000
 const GENERATED_CODES_KEY = 'reality-simulator:generated-live-codes'
 const MANUAL_CODES_KEY = 'reality-simulator:manual-live-codes'
+const SEEN_SPORTYBET_CODES_KEY = 'reality-stimulator:seen-sportybet-codes'
 const GENERATED_CODE_TTL_MS = 24 * 60 * 60 * 1000
+const MAX_SEEN_CODES = 2000
 
 type FeedBody = {
   success: true
   updatedAt: string
   sportybet: LiveCode[]
-  betway: LiveCode[]
   warnings?: string[]
 }
 
 let cached: { expiresAt: number, body: FeedBody } | null = null
 let generatedMemory: LiveCode[] = []
 let manualMemory: LiveCode[] = []
+let seenSportybetCodesMemory: string[] = []
 
 function headerValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] ?? '' : value ?? ''
@@ -90,6 +92,31 @@ async function kvCommand(command: unknown[]) {
   return response.json() as Promise<{ result?: unknown }>
 }
 
+async function readSeenSportybetCodes() {
+  const result = await kvCommand(['LRANGE', SEEN_SPORTYBET_CODES_KEY, '0', String(MAX_SEEN_CODES - 1)])
+  const storedCodes = result && Array.isArray(result.result)
+    ? result.result.filter((item): item is string => typeof item === 'string')
+      .map((code) => code.toUpperCase())
+      .filter((code) => isValidBookieCode('sportybet', code))
+    : []
+  return new Set([...storedCodes, ...seenSportybetCodesMemory].slice(0, MAX_SEEN_CODES))
+}
+
+async function rememberSeenSportybetCodes(codes: string[]) {
+  const seenCodes = await readSeenSportybetCodes()
+  const newCodes = [...new Set(codes.map((code) => code.toUpperCase()))]
+    .filter((code) => isValidBookieCode('sportybet', code) && !seenCodes.has(code))
+  if (!newCodes.length) return
+
+  if (kvCredentials()) {
+    await kvCommand(['LPUSH', SEEN_SPORTYBET_CODES_KEY, ...newCodes.slice().reverse()])
+    await kvCommand(['LTRIM', SEEN_SPORTYBET_CODES_KEY, '0', String(MAX_SEEN_CODES - 1)])
+  }
+  seenSportybetCodesMemory = [...newCodes, ...seenSportybetCodesMemory]
+    .filter((code, index, all) => all.indexOf(code) === index)
+    .slice(0, MAX_SEEN_CODES)
+}
+
 async function readGeneratedCodes() {
   const result = await kvCommand(['LRANGE', GENERATED_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
   const stored = !result || !Array.isArray(result.result)
@@ -99,7 +126,7 @@ async function readGeneratedCodes() {
     try {
       const parsed = JSON.parse(item) as LiveCode
       const valid = parsed.code &&
-        (parsed.bookie === 'sportybet' || parsed.bookie === 'betway') &&
+        parsed.bookie === 'sportybet' &&
         parsed.countryCode === 'GHANA'
       return valid ? [parsed] : []
     } catch {
@@ -123,7 +150,7 @@ async function readManualCodes() {
       try {
         const parsed = JSON.parse(item) as LiveCode
         return parsed.source === 'manual' &&
-          (parsed.bookie === 'sportybet' || parsed.bookie === 'betway') &&
+          parsed.bookie === 'sportybet' &&
           parsed.countryCode === 'GHANA'
           ? [parsed]
           : []
@@ -133,7 +160,7 @@ async function readManualCodes() {
     })
   return stored.filter((item) =>
     item.source === 'manual' &&
-    (item.bookie === 'sportybet' || item.bookie === 'betway') &&
+    item.bookie === 'sportybet' &&
     item.countryCode === 'GHANA')
 }
 
@@ -175,25 +202,19 @@ async function storeGeneratedCode(body: Record<string, unknown>) {
   const code = typeof body.code === 'string' ? body.code.toUpperCase() : ''
   const countryCode = typeof body.countryCode === 'string' ? body.countryCode.toUpperCase() : 'GHANA'
   const bookie = typeof body.bookie === 'string' ? body.bookie.toLowerCase() : 'sportybet'
-  if ((bookie !== 'sportybet' && bookie !== 'betway') || countryCode !== 'GHANA') {
-    throw new Error('Only SportyBet Ghana (GH) or Betway Ghana (GH) codes can be stored.')
+  if (bookie !== 'sportybet' || countryCode !== 'GHANA') {
+    throw new Error('Only SportyBet Ghana (GH) codes can be stored.')
   }
   const time = typeof body.time === 'string' && Number.isFinite(Date.parse(body.time))
     ? new Date(body.time).toISOString()
     : new Date().toISOString()
   const legs = Array.isArray(body.legs) ? body.legs : []
   const validLegs = legs.length > 0 ? validStoredLegs(legs) : []
-  if (bookie === 'sportybet' && !/^[A-Z0-9]{6}$/.test(code)) {
+  if (!/^[A-Z0-9]{6}$/.test(code)) {
     throw new Error('A valid 6-character SportyBet Ghana booking code is required.')
   }
-  if (bookie === 'sportybet' && !/\d/.test(code) && body.verified !== true) {
-    throw new Error('SportyBet booking codes must contain a digit unless Playwright verification is provided.')
-  }
-  if (bookie === 'betway' && !/^BW[A-Z0-9]{6}$/.test(code)) {
-    throw new Error('A valid 8-character Betway Ghana booking code starting with BW is required.')
-  }
-  if (bookie === 'betway' && !/[0-9]/.test(code.slice(2))) {
-    throw new Error('Betway booking code suffix must contain at least one digit.')
+  if (!/\d/.test(code)) {
+    throw new Error('SportyBet booking codes must contain at least one digit.')
   }
   const source = body.source === 'manual' ? 'manual' : 'generated'
   const expiresAt = source === 'generated'
@@ -227,6 +248,7 @@ async function storeGeneratedCode(body: Record<string, unknown>) {
     await kvCommand(['LPUSH', GENERATED_CODES_KEY, JSON.stringify(record)])
     await kvCommand(['LTRIM', GENERATED_CODES_KEY, '0', String(MAX_PER_BOOKIE - 1)])
   }
+  await rememberSeenSportybetCodes([record.code])
   cached = null
   return record
 }
@@ -250,47 +272,39 @@ function findOdds(text: string) {
 }
 
 function isValidCode(value: string) {
-  return /^[A-Z0-9]{6,8}$/i.test(value) && /\d/.test(value) && /[A-Z]/i.test(value) &&
+  return /^[A-Z0-9]{6}$/i.test(value) && /\d/.test(value) &&
     !STOP_WORDS.has(value.toUpperCase())
 }
 
 function isValidExplicitCode(value: string) {
   const code = value.toUpperCase()
-  if (code.startsWith('BW')) return isValidBookieCode('betway', code)
   return isValidBookieCode('sportybet', code) && !STOP_WORDS.has(code)
 }
 
-function isValidBookieCode(bookie: Bookie, code: string) {
-  if (bookie === 'betway') return /^BW[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code.slice(2))
+function isValidBookieCode(_bookie: Bookie, code: string) {
   return /^[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code)
 }
 
-function extractCodes(text: string): Array<{ bookie: Bookie, code: string }> {
-  const found = new Map<string, Bookie>()
+function extractCodes(text: string): Array<{ code: string }> {
+  const found = new Set<string>()
   const explicitTokens = [
-    ...text.matchAll(/shareCode=([A-Z0-9]{6,8})/gi),
-    ...text.matchAll(/\/m\/code-hub\/([A-Z0-9]{6,8})/gi),
-    ...text.matchAll(/(?:Booking\s*Code|Sportybet|Code)[:\s-]+([A-Z0-9]{6,8})/gi),
-    ...text.matchAll(/\b(BW[A-Z0-9]{6,8})\b/gi),
+    ...text.matchAll(/shareCode=([A-Z0-9]{6})/gi),
+    ...text.matchAll(/\/m\/code-hub\/([A-Z0-9]{6})/gi),
+    ...text.matchAll(/(?:Booking\s*Code|Sportybet|Code)[:\s-]+([A-Z0-9]{6})/gi),
   ]
-  const explicitMatches = explicitTokens.map((match) => ({ code: match[1], index: match.index ?? 0, explicit: true }))
-  const standaloneMatches = [...text.matchAll(/\b[A-Z0-9]{6,8}\b/g)]
+  const explicitMatches = explicitTokens.map((match) => ({ code: match[1], explicit: true }))
+  const standaloneMatches = [...text.matchAll(/\b[A-Z0-9]{6}\b/g)]
     .filter((match) => isValidCode(match[0]))
-    .map((match) => ({ code: match[0], index: match.index ?? 0, explicit: false }))
-  for (const { code: rawCode, index, explicit } of [...explicitMatches, ...standaloneMatches]) {
+    .map((match) => ({ code: match[0], explicit: false }))
+  for (const { code: rawCode, explicit } of [...explicitMatches, ...standaloneMatches]) {
     const code = rawCode.toUpperCase()
     if (explicit ? !isValidExplicitCode(code) : !isValidCode(code)) continue
     // Filter out codes that are emoji-only or consist of repeated characters (junk from image filenames like F09F9189)
     const isJunkCode = (code: string) => /^[^\p{L}\p{N}]+$/u.test(code) || /^(.)\1{5,}$/u.test(code) || code.length > 12
     if (isJunkCode(code)) continue
-    const before = text.slice(Math.max(0, index - 40), index)
-    if (code.startsWith('BW')) {
-      if (isValidBookieCode('betway', code)) found.set(code, 'betway')
-    } else if (/sporty\s*bet/i.test(before) || code.length === 6) {
-      found.set(code, 'sportybet')
-    }
+    found.add(code)
   }
-  return [...found].map(([code, bookie]) => ({ code, bookie }))
+  return [...found].map((code) => ({ code }))
 }
 
 async function fetchChannel(channel: string): Promise<LiveCode[]> {
@@ -311,8 +325,8 @@ async function fetchChannel(channel: string): Promise<LiveCode[]> {
     if (Date.now() - postTime > MAX_CODE_AGE_MS) continue
     const text = htmlToText(body).trim()
     const odds = findOdds(text)
-    for (const { bookie, code } of extractCodes(`${body} ${text}`)) {
-      codes.push({ id: `${post}:${bookie}:${code}`, code, odds, time: new Date(postTime).toISOString(), bookie, channel, countryCode, source: 'telegram' })
+    for (const { code } of extractCodes(`${body} ${text}`)) {
+      codes.push({ id: `${post}:sportybet:${code}`, code, odds, time: new Date(postTime).toISOString(), bookie: 'sportybet', channel, countryCode, source: 'telegram' })
     }
   }
   return codes
@@ -358,12 +372,6 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
         isValidBookieCode(item.bookie, item.code) &&
         (item.source !== 'generated' ||
           (!item.expiresAt || Date.parse(item.expiresAt) > now))),
-      betway: cached.body.betway.filter((item) =>
-        item.bookie === 'betway' &&
-        item.countryCode === 'GHANA' &&
-        isValidBookieCode(item.bookie, item.code) &&
-        (item.source !== 'generated' ||
-          (!item.expiresAt || Date.parse(item.expiresAt) > now))),
     }
     return response.status(200).json(filtered)
   }
@@ -379,7 +387,6 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
       success: true as const,
       updatedAt: new Date(now).toISOString(),
       sportybet: [],
-      betway: [],
       warnings,
     })
   }
@@ -403,27 +410,39 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
     manual = manualMemory
   }
   generated = generated.filter((item) =>
-    (item.bookie === 'sportybet' || item.bookie === 'betway') &&
+    item.bookie === 'sportybet' &&
     item.countryCode === 'GHANA' &&
     isValidBookieCode(item.bookie, item.code))
   manual = manual.filter((item) =>
     item.source === 'manual' &&
-    (item.bookie === 'sportybet' || item.bookie === 'betway') &&
+    item.bookie === 'sportybet' &&
     item.countryCode === 'GHANA' &&
     isValidBookieCode(item.bookie, item.code))
-  const body = {
+  const candidates = [...generated, ...manual, ...newestFirst]
+    .filter((item) => item.bookie === 'sportybet' &&
+      item.countryCode === 'GHANA' &&
+      isValidBookieCode(item.bookie, item.code))
+    .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
+    .sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
+  let seenCodes: Set<string>
+  try {
+    seenCodes = await readSeenSportybetCodes()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Live code history is unavailable.'
+    return response.status(503).json({ success: false, error: message })
+  }
+  const fresh = candidates.filter((item) => !seenCodes.has(item.code.toUpperCase()))
+  const active = (fresh.length ? fresh : candidates).slice(0, MAX_PER_BOOKIE)
+  try {
+    await rememberSeenSportybetCodes(active.map((item) => item.code))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Live code history could not be updated.'
+    return response.status(503).json({ success: false, error: message })
+  }
+  const body: FeedBody = {
     success: true as const,
     updatedAt: new Date(now).toISOString(),
-    sportybet: [...generated, ...manual, ...newestFirst.filter((item) => item.bookie === 'sportybet')]
-      .filter((item) => item.bookie === 'sportybet')
-      .filter((item) => isValidBookieCode(item.bookie, item.code))
-      .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
-      .slice(0, MAX_PER_BOOKIE),
-    betway: [...generated, ...manual, ...newestFirst.filter((item) => item.bookie === 'betway')]
-      .filter((item) => item.bookie === 'betway')
-      .filter((item) => isValidBookieCode(item.bookie, item.code))
-      .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
-      .slice(0, MAX_PER_BOOKIE),
+    sportybet: active,
     ...(warnings.length > 0 ? { warnings } : {}),
   }
   cached = { expiresAt: now + CACHE_TTL_MS, body }
