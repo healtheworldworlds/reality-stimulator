@@ -1080,6 +1080,208 @@ h2 {
   font-size: 12px;
 }
 
+.daily-board {
+  padding: 34px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.daily-board__heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.daily-board__heading .eyebrow {
+  margin-bottom: 7px;
+}
+
+.daily-board__heading h2 {
+  font-size: clamp(26px, 3vw, 34px);
+}
+
+.daily-board__intro,
+.daily-board__note,
+.daily-board__message {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.daily-board__refresh {
+  min-height: 36px;
+  flex: 0 0 auto;
+  font-size: 11px;
+}
+
+.daily-board__message.is-error {
+  color: #a33a2a;
+}
+
+.daily-picks {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.daily-pick {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) minmax(220px, 1.6fr) minmax(160px, 0.9fr);
+  align-items: center;
+  gap: 18px;
+  padding: 18px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.daily-pick__details {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.daily-pick__league {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.daily-pick__teams {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--text);
+  font-family: var(--serif);
+  font-size: 19px;
+}
+
+.daily-pick__versus {
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 10px;
+}
+
+.daily-pick__selection {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.daily-pick__badge {
+  padding: 7px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.daily-pick__odds {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-tools {
+  margin: 28px 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.admin-tools__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.admin-tools__heading h2 {
+  font-size: 20px;
+}
+
+.admin-tools__fixtures {
+  display: grid;
+  gap: 9px;
+  margin: 14px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+
+.admin-tools__fixtures li {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.admin-tools__fixtures strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.daily-app__intro {
+  padding: 48px 0 34px;
+  border-bottom: 1px solid var(--border);
+}
+
+.daily-app__intro .eyebrow {
+  margin-bottom: 12px;
+}
+
+.daily-app__intro h1 {
+  font-size: clamp(40px, 6vw, 62px);
+  line-height: 1.02;
+}
+
+.daily-app__intro p:last-child {
+  max-width: 520px;
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+@media (max-width: 720px) {
+  .daily-pick {
+    grid-template-columns: 1fr;
+    gap: 11px;
+    padding: 17px 0;
+  }
+
+  .daily-pick__selection {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 520px) {
+  .daily-board__heading {
+    align-items: flex-start;
+  }
+
+  .daily-board__refresh {
+    padding: 7px;
+    font-size: 0;
+  }
+
+  .daily-board__refresh svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .admin-tools {
+    padding: 14px;
+  }
+}
+
 .side-heading--slip h2 {
   display: flex;
   align-items: center;

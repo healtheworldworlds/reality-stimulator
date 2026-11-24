@@ -11,6 +11,7 @@ type AdminModalProps = {
   passwordRequired: boolean
   onClose: () => void
   onSaved: (passwordRequired: boolean) => void
+  onAdminVerified: (masterKey: string) => void
 }
 
 type VisitorUnlockModalProps = {
@@ -80,7 +81,7 @@ export function VisitorUnlockModal({ onUnlocked }: VisitorUnlockModalProps) {
   )
 }
 
-export function AdminModal({ passwordRequired: initialPasswordRequired, onClose, onSaved }: AdminModalProps) {
+export function AdminModal({ passwordRequired: initialPasswordRequired, onClose, onSaved, onAdminVerified }: AdminModalProps) {
   const [masterKey, setMasterKey] = useState('')
   const [verified, setVerified] = useState(false)
   const [passwordRequired, setPasswordRequired] = useState(initialPasswordRequired)
@@ -101,6 +102,7 @@ export function AdminModal({ passwordRequired: initialPasswordRequired, onClose,
         return
       }
       setVerified(true)
+      onAdminVerified(masterKey)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not verify the master key.')
     } finally {
