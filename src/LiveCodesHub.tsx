@@ -115,9 +115,7 @@ export function LiveCodesHub() {
               <span className="live-code__country">
                 {item.countryCode ?? 'GHANA'}
               </span>
-              {item.source === 'generated' && <span className="live-code__country">GENERATED</span>}
-              {item.source === 'manual' && <span className="live-code__country">MANUAL</span>}
-              {item.source === 'telegram' && <span className="live-code__country">{item.ocr ? 'TELEGRAM OCR' : 'TELEGRAM'}</span>}
+              <span className="live-code__country">{item.source === 'manual' ? 'MANUAL' : 'GENERATED'}</span>
             </div>
             <div className="live-code__tags">
               {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}
