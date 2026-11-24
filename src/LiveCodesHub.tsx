@@ -112,6 +112,9 @@ export function LiveCodesHub() {
             <div className="live-code__main">
               <strong className="live-code__code">{item.code}</strong>
               <span className="live-code__country">SPORTYBET GH</span>
+              <span className="live-code__country">
+                {item.countryCode ?? 'GHANA'}
+              </span>
               <span className="live-code__country">{item.source === 'manual' ? 'MANUAL' : 'GENERATED'}</span>
             </div>
             <div className="live-code__tags">

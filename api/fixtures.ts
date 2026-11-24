@@ -26,11 +26,6 @@ type ApiFootballFixture = {
   goals?: { home?: number | null; away?: number | null }
 }
 
-type TeamGoalStats = {
-  scored: number
-  conceded: number
-}
-
 function utcDate() {
   return new Date().toISOString().slice(0, 10)
 }
@@ -67,31 +62,20 @@ async function apiFootballGet(credentials: ReturnType<typeof apiFootballCredenti
   return payload?.response ?? []
 }
 
-function recentGoalStats(fixtures: unknown[], teamId: number): TeamGoalStats | undefined {
+function scoringStreak(fixtures: unknown[], teamId: number): number | undefined {
   const matches = fixtures as ApiFootballFixture[]
   const ordered = matches
-    .filter((fixture) =>
-      fixture.fixture?.status?.short === 'FT' &&
-      typeof fixture.goals?.home === 'number' &&
-      typeof fixture.goals?.away === 'number' &&
-      (fixture.teams?.home?.id === teamId || fixture.teams?.away?.id === teamId),
-    )
+    .filter((fixture) => fixture.fixture?.status?.short === 'FT')
     .sort((left, right) =>
       String(right.fixture?.date ?? '').localeCompare(String(left.fixture?.date ?? '')))
-    .slice(0, 5)
-  if (ordered.length < 3) return undefined
-
-  const totals = ordered.reduce((stats, fixture) => {
+  let streak = 0
+  for (const fixture of ordered) {
     const isHome = fixture.teams?.home?.id === teamId
-    const scored = isHome ? fixture.goals!.home! : fixture.goals!.away!
-    const conceded = isHome ? fixture.goals!.away! : fixture.goals!.home!
-    return { scored: stats.scored + scored, conceded: stats.conceded + conceded }
-  }, { scored: 0, conceded: 0 })
-
-  return {
-    scored: totals.scored / ordered.length,
-    conceded: totals.conceded / ordered.length,
+    const goals = isHome ? fixture.goals?.home : fixture.teams?.away?.id === teamId ? fixture.goals?.away : null
+    if (typeof goals !== 'number' || goals <= 0) break
+    streak += 1
   }
+  return ordered.length > 0 ? streak : undefined
 }
 
 async function mapApiFootballFixtures(date: string, credentials: NonNullable<ReturnType<typeof apiFootballCredentials>>) {
@@ -101,14 +85,14 @@ async function mapApiFootballFixtures(date: string, credentials: NonNullable<Ret
   const teamIds = [...new Set(fixtures.flatMap((fixture) =>
     [fixture.teams?.home?.id, fixture.teams?.away?.id].filter((id): id is number => typeof id === 'number'),
   ))].slice(0, 40)
-  const teamStats = new Map<number, TeamGoalStats>()
+  const streaks = new Map<number, number>()
   await Promise.all(teamIds.map(async (teamId) => {
     try {
       const recent = await apiFootballGet(credentials, `/fixtures?team=${teamId}&status=FT&last=5&timezone=UTC`)
-      const stats = recentGoalStats(Array.isArray(recent) ? recent : [], teamId)
-      if (stats) teamStats.set(teamId, stats)
+      const streak = scoringStreak(Array.isArray(recent) ? recent : [], teamId)
+      if (streak !== undefined) streaks.set(teamId, streak)
     } catch {
-      // Missing form data is intentionally excluded from the featured picks.
+      // Missing streak data is intentionally excluded from goal markets.
     }
   }))
 
@@ -119,15 +103,9 @@ async function mapApiFootballFixtures(date: string, credentials: NonNullable<Ret
     const away = fixture.teams?.away
     if (!fixtureId || !kickoffDate || !home?.name || !away?.name) return []
     const statusShort = fixture.fixture?.status?.short
-    if (!statusShort || !['NS', 'TBD'].includes(String(statusShort))) return []
-    const homeStats = typeof home.id === 'number' ? teamStats.get(home.id) : undefined
-    const awayStats = typeof away.id === 'number' ? teamStats.get(away.id) : undefined
-    if (!homeStats || !awayStats) return []
-    const expectedTotalGoals = (
-      homeStats.scored + awayStats.conceded + awayStats.scored + homeStats.conceded
-    ) / 2
-    const over15Probability = 1 - Math.exp(-expectedTotalGoals) * (1 + expectedTotalGoals)
-    if (!Number.isFinite(over15Probability) || over15Probability <= 0) return []
+  if (!statusShort || String(statusShort) === '0' || ['NS', 'TBD'].includes(String(statusShort))) return []
+    const homeStreak = typeof home.id === 'number' ? streaks.get(home.id) : undefined
+    const awayStreak = typeof away.id === 'number' ? streaks.get(away.id) : undefined
     const d = new Date(kickoffDate)
     const hours = String(d.getUTCHours()).padStart(2, '0')
     const mins = String(d.getUTCMinutes()).padStart(2, '0')
@@ -140,9 +118,9 @@ async function mapApiFootballFixtures(date: string, credentials: NonNullable<Ret
       competition: fixture.league?.name || 'API-Football Match',
       home: home.name,
       away: away.name,
-      marketType: 'Over1.5',
-      over15Probability,
-      over15Odds: 1 / over15Probability,
+      ...(homeStreak !== undefined && awayStreak !== undefined
+        ? { homeScoringStreak: homeStreak, awayScoringStreak: awayStreak, streakDataAvailable: true }
+        : {}),
       teams: { home: home.name, away: away.name },
       source: 'api-football',
     }]
@@ -179,7 +157,14 @@ export default async function fixturesHandler(request: FixturesRequest, response
       })
     }
     const mapped = await mapApiFootballFixtures(date, credentials)
-    const paginated = mapped.slice((pageNum - 1) * pageSize, pageNum * pageSize)
+    // Filter by status: only include fixtures that have started (not 'NS' or 'TBD')
+    const filtered = mapped.filter((f) => {
+      const statusShort = f.status
+      // 'NS' = not started, 'TBD' = to be decided; exclude these (treat as numeric 0 filter)
+      if (!statusShort) return false
+      return !['NS', 'TBD'].includes(statusShort)
+    })
+    const paginated = filtered.slice((pageNum - 1) * pageSize, pageNum * pageSize)
     if (paginated.length > 0) {
       const payload = { status: 'available', response: paginated, source: 'api-football', date, pageNum, pageSize }
       fixtureCache = { key: cacheKey, expiresAt: now + FIXTURE_CACHE_TTL_MS, payload }

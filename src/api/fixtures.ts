@@ -9,8 +9,6 @@ export interface LiveFixture {
   marketType?: '1X2' | 'Over1.5' | 'Over2.5' | 'SHH'
   selectedOption?: '1' | 'X' | '2'
   sportyOdd?: number
-  over15Probability?: number
-  over15Odds?: number
   generatedId?: string
   homeScoringStreak?: number
   awayScoringStreak?: number
@@ -39,7 +37,7 @@ function noFixturesFallback(reason: string): FixtureFetchResult {
 export async function fetchTodaysFixtures(_start?: unknown, _end?: unknown): Promise<FixtureFetchResult> {
   try {
     const date = new Date().toISOString().slice(0, 10)
-    const response = await fetch(`/api/fixtures?date=${date}&pageSize=100&pageNum=1`, {
+    const response = await fetch(`/api/fixtures?date=${date}&pageSize=20&pageNum=1`, {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
     })
