@@ -5,6 +5,12 @@ import { chromium } from 'playwright';
 
 const SEEN_CODES_FILE = 'seen_sportybet_codes.json';
 const MAX_SEEN_CODES = 2000;
+const BOOKMAKER_BRANDS = new Set([
+  'BET365', 'BETGR8', 'BET9JA', '1XBET', 'SPORTY', 'SPORTYBET',
+  'BWIN', 'MELBET', 'MSPORT', 'PARIPESA', 'BETWAY', 'BETPESA',
+  'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN',
+]);
+const BOOKMAKER_BRAND_PREFIXES = ['1XBET', 'BET365', 'BETGR8', 'BET9JA', 'BETWAY', 'BETPESA', 'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN'];
 
 function loadLocalEnv(root) {
   const envFile = path.join(root, '.env');
@@ -21,9 +27,20 @@ function loadLocalEnv(root) {
   }
 }
 
+export function isValidSportyBetCode(code) {
+  const value = String(code ?? '').trim().toUpperCase();
+  return /^[A-Z0-9]{6}$/.test(value) &&
+    /[A-Z]/.test(value) &&
+    /\d/.test(value) &&
+    !BOOKMAKER_BRANDS.has(value) &&
+    !BOOKMAKER_BRAND_PREFIXES.some((brand) => value.startsWith(brand)) &&
+    !/(.)\1{5}/.test(value) &&
+    !/^(?:012345|123456|654321|543210)$/.test(value);
+}
+
 export function normalizeCodeDiscovery(code, bookmaker, source = 'telegram', extra = {}) {
   const value = String(code ?? '').trim().toUpperCase();
-  if (bookmaker !== 'sportybet' || !/^[A-Z0-9]{6}$/.test(value) || !/\d/.test(value)) return null;
+  if (bookmaker !== 'sportybet' || !isValidSportyBetCode(value)) return null;
   return {
     code: value,
     bookmaker,
@@ -65,8 +82,7 @@ export async function mergeDiscoveryOutput(root, records) {
   const manifestFile = path.join(root, 'generated_slips.jsonl');
   const seenCodesFile = path.join(root, SEEN_CODES_FILE);
   const existingCodes = fs.existsSync(generatedFile)
-    ? fs.readFileSync(generatedFile, 'utf8').split(/\r?\n/).map((line) => line.trim().toUpperCase()).filter((code) =>
-      /^[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code))
+    ? fs.readFileSync(generatedFile, 'utf8').split(/\r?\n/).map((line) => line.trim().toUpperCase()).filter(isValidSportyBetCode)
     : [];
   const incomingRecords = deduplicateDiscoveries(records)
     .filter((record) => record?.bookmaker === 'sportybet')
@@ -76,8 +92,7 @@ export async function mergeDiscoveryOutput(root, records) {
       try { return JSON.parse(line); } catch { return null; }
     }).filter((entry) => entry?.bookie === 'sportybet:gh' &&
       typeof entry.code === 'string' &&
-      /^[A-Z0-9]{6}$/.test(entry.code.toUpperCase()) &&
-      /[0-9]/.test(entry.code))
+      isValidSportyBetCode(entry.code))
     : [];
   let localSeen = [];
   if (fs.existsSync(seenCodesFile)) {
@@ -85,7 +100,7 @@ export async function mergeDiscoveryOutput(root, records) {
       const state = JSON.parse(fs.readFileSync(seenCodesFile, 'utf8'));
       localSeen = Array.isArray(state.codes)
         ? state.codes.map((entry) => typeof entry === 'string' ? entry : entry?.code)
-          .filter((code) => typeof code === 'string' && /^[A-Z0-9]{6}$/.test(code.toUpperCase()) && /\d/.test(code))
+          .filter(isValidSportyBetCode)
           .map((code) => code.toUpperCase())
         : [];
     } catch (error) {

@@ -21,6 +21,7 @@ type LiveCode = {
 type CodesRequest = {
   method?: string
   headers?: Record<string, string | string[] | undefined>
+  query?: Record<string, string | string[] | undefined>
   body?: unknown
 }
 
@@ -50,6 +51,12 @@ const STOP_WORDS = new Set([
   'FLORIDA', 'KNICKS', 'LEAGUE', 'LOSERS', 'ASTANA',
   'TODAY', 'FREE', 'TICKET', 'VOUCHER', 'WINNER', 'MOBILE', 'TOMORROW', 'WINNERS',
 ])
+const BOOKMAKER_BRANDS = new Set([
+  'BET365', 'BETGR8', 'BET9JA', '1XBET', 'SPORTY', 'SPORTYBET',
+  'BWIN', 'MELBET', 'MSPORT', 'PARIPESA', 'BETWAY', 'BETPESA',
+  'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN',
+])
+const BOOKMAKER_BRAND_PREFIXES = ['1XBET', 'BET365', 'BETGR8', 'BET9JA', 'BETWAY', 'BETPESA', 'BETKING', 'BETANO', 'BETFAIR', 'BETFRED', 'BETIKA', 'BETWIN']
 const MAX_CODE_AGE_MS = 24 * 60 * 60 * 1000
 const GENERATED_CODES_KEY = 'reality-simulator:generated-live-codes'
 const MANUAL_CODES_KEY = 'reality-simulator:manual-live-codes'
@@ -210,11 +217,8 @@ async function storeGeneratedCode(body: Record<string, unknown>) {
     : new Date().toISOString()
   const legs = Array.isArray(body.legs) ? body.legs : []
   const validLegs = legs.length > 0 ? validStoredLegs(legs) : []
-  if (!/^[A-Z0-9]{6}$/.test(code)) {
-    throw new Error('A valid 6-character SportyBet Ghana booking code is required.')
-  }
-  if (!/\d/.test(code)) {
-    throw new Error('SportyBet booking codes must contain at least one digit.')
+  if (!isValidBookieCode('sportybet', code)) {
+    throw new Error('A valid 6-character SportyBet Ghana booking code is required; bookmaker names and junk tokens are not accepted.')
   }
   const source = body.source === 'manual' ? 'manual' : 'generated'
   const expiresAt = source === 'generated'
@@ -223,9 +227,11 @@ async function storeGeneratedCode(body: Record<string, unknown>) {
   const record: LiveCode = {
     id: `generated:${code}:${time}`,
     code,
-    odds: typeof body.combinedOdds === 'number' && body.combinedOdds >= 1
+    odds: typeof body.combinedOdds === 'number' && body.combinedOdds > 0
       ? body.combinedOdds
-      : legs.reduce((total, leg) => total * (typeof (leg as Record<string, unknown>)?.odds === 'number' ? (leg as Record<string, number>).odds : 1), legs.length ? 1 : 0),
+      : legs.length
+        ? legs.reduce((total, leg) => total * (typeof (leg as Record<string, unknown>)?.odds === 'number' ? (leg as Record<string, number>).odds : 1), 1)
+        : null,
     time,
     bookie: bookie as Bookie,
     channel: typeof body.channel === 'string' ? body.channel : 'reality-simulator',
@@ -272,17 +278,23 @@ function findOdds(text: string) {
 }
 
 function isValidCode(value: string) {
-  return /^[A-Z0-9]{6}$/i.test(value) && /\d/.test(value) &&
-    !STOP_WORDS.has(value.toUpperCase())
+  return isValidBookieCode('sportybet', value)
 }
 
 function isValidExplicitCode(value: string) {
-  const code = value.toUpperCase()
-  return isValidBookieCode('sportybet', code) && !STOP_WORDS.has(code)
+  return isValidCode(value)
 }
 
 function isValidBookieCode(_bookie: Bookie, code: string) {
-  return /^[A-Z0-9]{6}$/.test(code) && /[0-9]/.test(code)
+  const normalized = code.toUpperCase()
+  return /^[A-Z0-9]{6}$/.test(normalized) &&
+    /[A-Z]/.test(normalized) &&
+    /[0-9]/.test(normalized) &&
+    !STOP_WORDS.has(normalized) &&
+    !BOOKMAKER_BRANDS.has(normalized) &&
+    !BOOKMAKER_BRAND_PREFIXES.some((brand) => normalized.startsWith(brand)) &&
+    !/^(.)\1{5}$/.test(normalized) &&
+    !/^(?:012345|123456|654321|543210)$/.test(normalized)
 }
 
 function extractCodes(text: string): Array<{ code: string }> {
@@ -293,7 +305,7 @@ function extractCodes(text: string): Array<{ code: string }> {
     ...text.matchAll(/(?:Booking\s*Code|Sportybet|Code)[:\s-]+([A-Z0-9]{6})/gi),
   ]
   const explicitMatches = explicitTokens.map((match) => ({ code: match[1], explicit: true }))
-  const standaloneMatches = [...text.matchAll(/\b[A-Z0-9]{6}\b/g)]
+  const standaloneMatches = [...text.matchAll(/\b[A-Z0-9]{6}\b/gi)]
     .filter((match) => isValidCode(match[0]))
     .map((match) => ({ code: match[0], explicit: false }))
   for (const { code: rawCode, explicit } of [...explicitMatches, ...standaloneMatches]) {
@@ -333,7 +345,8 @@ async function fetchChannel(channel: string): Promise<LiveCode[]> {
 }
 
 export default async function liveCodesHandler(request: CodesRequest, response: CodesResponse) {
-  response.setHeader('Cache-Control', request.method === 'POST' ? 'no-store' : 'public, s-maxage=60, stale-while-revalidate=30')
+  const forceRefresh = request.method === 'GET' && request.query?.refresh !== undefined
+  response.setHeader('Cache-Control', request.method === 'POST' || forceRefresh ? 'no-store' : 'public, s-maxage=60, stale-while-revalidate=30')
   response.setHeader('X-Content-Type-Options', 'nosniff')
   if (request.method === 'POST') {
     const submittedKey = headerValue(request.headers?.['x-admin-key'])
@@ -363,7 +376,7 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
   }
 
   const now = Date.now()
-  if (cached && cached.expiresAt > now) {
+  if (!forceRefresh && cached && cached.expiresAt > now) {
     const filtered = {
       ...cached.body,
       sportybet: cached.body.sportybet.filter((item) =>
@@ -381,6 +394,9 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
   const warnings = settled.flatMap((result, index) =>
     result.status === 'rejected' ? [`${CHANNELS[index]}: ${result.reason instanceof Error ? result.reason.message : 'feed unavailable'}`] : [],
   )
+  if (!kvCredentials()) {
+    warnings.push('Upstash KV is not configured; seen-code history is only retained in this server instance.')
+  }
   if (all.length === 0 && settled.every((result) => result.status === 'rejected')) {
     if (cached) return response.status(200).json(cached.body)
     return response.status(200).json({
@@ -423,7 +439,19 @@ export default async function liveCodesHandler(request: CodesRequest, response: 
       item.countryCode === 'GHANA' &&
       isValidBookieCode(item.bookie, item.code))
     .filter((item, index, all) => all.findIndex((candidate) => candidate.code === item.code) === index)
-    .sort((a, b) => Date.parse(b.time) - Date.parse(a.time))
+    .sort((a, b) => {
+      const aHasMetadata = Number(
+        (typeof a.odds === 'number' && a.odds > 0) ||
+        (a.legs?.length ?? 0) > 0 ||
+        (a.source === 'telegram' && Number.isFinite(Date.parse(a.time))),
+      )
+      const bHasMetadata = Number(
+        (typeof b.odds === 'number' && b.odds > 0) ||
+        (b.legs?.length ?? 0) > 0 ||
+        (b.source === 'telegram' && Number.isFinite(Date.parse(b.time))),
+      )
+      return bHasMetadata - aHasMetadata || Date.parse(b.time) - Date.parse(a.time)
+    })
   let seenCodes: Set<string>
   try {
     seenCodes = await readSeenSportybetCodes()

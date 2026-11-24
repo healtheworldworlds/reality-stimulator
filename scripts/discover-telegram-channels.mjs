@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { isValidSportyBetCode } from './code-discovery.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_FILE = path.join(ROOT, 'telegram-channels.json');
@@ -110,7 +111,7 @@ function extractBookingCodes(html) {
   const text = stripHtml(html).toUpperCase();
   return [...new Set([...text.matchAll(/\b[A-Z0-9]{6}\b/g)]
     .map((match) => match[0])
-    .filter((code) => /[0-9]/.test(code)))];
+    .filter(isValidSportyBetCode))];
 }
 
 function previewHasBettingKeywords(html) {

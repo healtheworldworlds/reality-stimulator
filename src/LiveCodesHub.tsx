@@ -41,7 +41,7 @@ export function LiveCodesHub() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const response = await fetch('/api/live-codes')
+      const response = await fetch(`/api/live-codes?refresh=${Date.now()}`, { cache: 'no-store' })
       const payload = await response.json().catch(() => null) as FeedPayload | null
       if (!response.ok || !payload?.success) throw new Error(payload?.error ?? `Feed unavailable (HTTP ${response.status}).`)
       setFeed(payload)
@@ -104,7 +104,7 @@ export function LiveCodesHub() {
       </label>
       <p className="live-codes__guide">Available booking codes for SportyBet Ghana (GH).</p>
       {error && <p className="live-codes__error" role="alert">{error}</p>}
-      {feed?.warnings?.map((warning) => <p className="live-codes__warning" key={warning}>Some channels could not refresh: {warning}</p>)}
+      {feed?.warnings?.map((warning) => <p className="live-codes__warning" key={warning}>{warning}</p>)}
       {!error && !loading && items.length === 0 && <p className="live-codes__empty">No SportyBet GH codes found right now.</p>}
       <ul className="live-codes__list">
         {items.map((item) => (
@@ -118,8 +118,8 @@ export function LiveCodesHub() {
               <span className="live-code__country">{item.source === 'manual' ? 'MANUAL' : 'GENERATED'}</span>
             </div>
             <div className="live-code__tags">
-              {item.odds !== null && <span className="live-code__odds">{item.odds} Odds</span>}
-              {item.legs && <span className="live-code__odds">{item.legs.length} legs</span>}
+              {typeof item.odds === 'number' && item.odds > 0 && <span className="live-code__odds">{item.odds} Odds</span>}
+              {item.legs && item.legs.length > 0 && <span className="live-code__odds">{item.legs.length} legs</span>}
               {item.legs && <span className="live-code__channel">{[...new Set(item.legs.map((leg) => leg.market))].join(', ')}</span>}
               <span className="live-code__time">{relativeTime(item.time, now)}</span>
             </div>
